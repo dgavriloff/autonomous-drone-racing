@@ -130,10 +130,12 @@ class HighFreqRacingAviary(BaseRLAviary):
         self.gates_passed = 0
         self.episode_steps = 0
 
-        # Initialize parent
+        # Initialize parent with track start position
         super().__init__(
             drone_model=drone_model,
             num_drones=1,
+            initial_xyzs=np.array([self.track.start_position]),
+            initial_rpys=np.zeros((1, 3)),  # Level start
             physics=physics,
             pyb_freq=pyb_freq,
             ctrl_freq=ctrl_freq,
@@ -331,10 +333,9 @@ class HighFreqRacingAviary(BaseRLAviary):
 
         # === Gate passed bonus (big reward) ===
         if dist_to_gate < self.gate_tolerance:
-            # Check if we're on the correct side of the gate
-            gate_dir = self._get_gate_direction(gate)
-            to_gate = gate.position - pos
-            if np.dot(to_gate, gate_dir) < 0:  # Passed through
+            # Simple proximity-based detection for curriculum learning
+            # More sophisticated direction-based detection can be added later
+            if not gate.passed:  # Only trigger once per gate
                 reward += self.reward_gate_passed
                 self._advance_gate()
                 self.prev_dist_to_gate = None  # Reset for new gate
