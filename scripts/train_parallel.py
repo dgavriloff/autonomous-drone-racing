@@ -200,11 +200,11 @@ class VelocityRacingEnv(BaseRLAviary):
         return obs, reward, terminated, truncated, info
 
 
-def make_env(rank, seed, num_gates, radius):
+def make_env(rank, seed, num_gates, radius, max_steps=1000):
     """Create a single environment instance."""
     def _init():
         track = create_simple_track(num_gates, radius)
-        env = VelocityRacingEnv(track, gui=False)
+        env = VelocityRacingEnv(track, gui=False, max_steps=max_steps)
         env.reset(seed=seed + rank)
         return env
     set_random_seed(seed)
@@ -246,6 +246,7 @@ def train(
     radius=1.5,
     n_envs=16,
     algorithm="SAC",
+    max_steps=1000,
 ):
     """Train with parallel environments."""
     print("=" * 60)
@@ -254,12 +255,13 @@ def train(
     print(f"Algorithm: {algorithm}")
     print(f"Parallel envs: {n_envs}")
     print(f"Gates: {num_gates}, Radius: {radius}m")
+    print(f"Max steps per episode: {max_steps}")
     print(f"Timesteps: {timesteps}")
     print()
 
     # Create parallel environments
     print(f"Creating {n_envs} parallel environments...")
-    env = SubprocVecEnv([make_env(i, 42, num_gates, radius) for i in range(n_envs)])
+    env = SubprocVecEnv([make_env(i, 42, num_gates, radius, max_steps) for i in range(n_envs)])
     env = VecMonitor(env)
     # Note: VecNormalize removed - relative observation space should be more stable
 
@@ -343,6 +345,7 @@ def main():
     parser.add_argument("--radius", type=float, default=1.5)
     parser.add_argument("--envs", type=int, default=16)
     parser.add_argument("--algorithm", type=str, default="SAC", choices=["SAC", "PPO"])
+    parser.add_argument("--max-steps", type=int, default=1000, help="Max steps per episode (default: 1000)")
     args = parser.parse_args()
 
     train(
@@ -351,6 +354,7 @@ def main():
         radius=args.radius,
         n_envs=args.envs,
         algorithm=args.algorithm,
+        max_steps=args.max_steps,
     )
 
 
