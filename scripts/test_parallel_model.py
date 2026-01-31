@@ -8,23 +8,24 @@ import time
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from stable_baselines3 import SAC
+from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from scripts.train_parallel import VelocityRacingEnv, create_simple_track
 
 
-def test_model(model_path="models/parallel_vel/final", num_episodes=5, gui=True, use_vecnorm=False):
+def test_model(model_path="models/parallel_vel/final", num_episodes=5, gui=True, use_vecnorm=False, max_steps=1000):
     """Test the trained model."""
     print("=" * 60)
     print("TESTING PARALLEL-TRAINED MODEL")
     print("=" * 60)
+    print(f"Max steps: {max_steps}")
 
     # Create environment
     track = create_simple_track(num_gates=5, radius=1.5)
 
     if use_vecnorm:
         # Wrap in VecEnv and load normalization stats
-        env = DummyVecEnv([lambda: VelocityRacingEnv(track, gui=gui, max_steps=500)])
+        env = DummyVecEnv([lambda: VelocityRacingEnv(track, gui=gui, max_steps=max_steps)])
         # Always use vecnormalize.pkl from the model directory
         vecnorm_path = str(Path(model_path).parent / "vecnormalize.pkl")
         env = VecNormalize.load(vecnorm_path, env)
@@ -32,11 +33,15 @@ def test_model(model_path="models/parallel_vel/final", num_episodes=5, gui=True,
         env.norm_reward = False
         print(f"Loaded VecNormalize from {vecnorm_path}")
     else:
-        env = VelocityRacingEnv(track, gui=gui, max_steps=500)
+        env = VelocityRacingEnv(track, gui=gui, max_steps=max_steps)
 
-    # Load model
-    model = SAC.load(model_path)
-    print(f"Loaded model from {model_path}")
+    # Load model (try PPO first, then SAC)
+    try:
+        model = PPO.load(model_path)
+        print(f"Loaded PPO model from {model_path}")
+    except Exception:
+        model = SAC.load(model_path)
+        print(f"Loaded SAC model from {model_path}")
     print()
 
     # Run episodes
@@ -104,6 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--no-gui", action="store_true")
     parser.add_argument("--vecnorm", action="store_true", help="Use VecNormalize (for models trained with it)")
+    parser.add_argument("--max-steps", type=int, default=1000, help="Max steps per episode (default: 1000)")
     args = parser.parse_args()
 
-    test_model(args.model, args.episodes, gui=not args.no_gui, use_vecnorm=args.vecnorm)
+    test_model(args.model, args.episodes, gui=not args.no_gui, use_vecnorm=args.vecnorm, max_steps=args.max_steps)
