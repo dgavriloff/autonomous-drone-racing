@@ -188,11 +188,9 @@ class GCNet(nn.Module):
             velocity_target,
         ])
 
-        # Convert to tensor
+        # Convert to tensor and move to same device as model
         x = torch.from_numpy(features).float().unsqueeze(0)
-
-        if next(self.parameters()).is_cuda:
-            x = x.cuda()
+        x = x.to(next(self.parameters()).device)
 
         # Predict
         rpms = self.predict_rpms(x)

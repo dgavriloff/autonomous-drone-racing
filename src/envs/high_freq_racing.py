@@ -66,6 +66,7 @@ class HighFreqRacingAviary(BaseRLAviary):
         obs_type: ObservationType = ObservationType.KIN,
         include_gate_info: bool = True,
         include_velocity_target: bool = True,
+        enable_vision: bool = True,  # Enable vision for pipeline even with KIN obs
         # Reward settings
         reward_gate_passed: float = 10.0,
         reward_velocity_bonus: float = 0.1,
@@ -91,6 +92,7 @@ class HighFreqRacingAviary(BaseRLAviary):
             obs_type: Observation type (KIN or RGB)
             include_gate_info: Include next gate info in observation
             include_velocity_target: Include velocity target in observation
+            enable_vision: Enable vision capture even with KIN observation type
             reward_*: Reward function weights
             max_episode_steps: Maximum steps per episode
             target_velocity: Target velocity for velocity bonus
@@ -101,6 +103,7 @@ class HighFreqRacingAviary(BaseRLAviary):
         self.include_velocity_target = include_velocity_target
         self.max_episode_steps_custom = max_episode_steps
         self.target_velocity = target_velocity
+        self.enable_vision = enable_vision
 
         # Reward weights
         self.reward_gate_passed = reward_gate_passed
@@ -127,6 +130,15 @@ class HighFreqRacingAviary(BaseRLAviary):
             obs=obs_type,
             act=ActionType.RPM,  # Direct RPM control
         )
+
+        # Initialize vision attributes manually if enabled (for pipeline use)
+        if enable_vision and not hasattr(self, 'IMG_RES'):
+            self.IMG_RES = np.array([64, 48])
+            self.IMG_FRAME_PER_SEC = 24
+            self.IMG_CAPTURE_FREQ = int(self.PYB_FREQ / self.IMG_FRAME_PER_SEC)
+            self.rgb = np.zeros((self.NUM_DRONES, 48, 64, 4))
+            self.dep = np.ones((self.NUM_DRONES, 48, 64))
+            self.seg = np.zeros((self.NUM_DRONES, 48, 64))
 
         # Create gate visualizations (after PyBullet is initialized)
         self.gate_visual_ids = []
