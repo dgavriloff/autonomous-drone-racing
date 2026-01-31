@@ -115,6 +115,15 @@ class HighFreqRacingAviary(BaseRLAviary):
         self.reward_orientation_penalty = reward_orientation_penalty
         self.prev_dist_to_gate = None  # For progress tracking
 
+        # PBRS (Potential-Based Reward Shaping) parameters
+        # Φ(s) = -distance_to_gate, so closer = higher potential
+        # r_shaped = r + γ×Φ(s') - Φ(s) where γ=0.99
+        self.pbrs_gamma = 0.99
+        self.pbrs_scale = 5.0  # Scale factor for PBRS
+
+        # Strong distance penalty to prevent flying away
+        self.distance_penalty_scale = 0.5  # Penalty per meter from gate
+
         # Track setup
         self.track = track or self._default_track()
         self.current_gate_idx = 0
@@ -269,7 +278,14 @@ class HighFreqRacingAviary(BaseRLAviary):
         return action * self.MAX_RPM
 
     def _computeReward(self) -> float:
-        """Compute reward for current state."""
+        """
+        Compute reward using PBRS (Potential-Based Reward Shaping).
+
+        PBRS ensures reward shaping doesn't change the optimal policy:
+        r_shaped = r + γ×Φ(s') - Φ(s)
+
+        Where Φ(s) = -distance_to_gate (closer = higher potential)
+        """
         reward = 0.0
 
         # Get state
@@ -278,29 +294,42 @@ class HighFreqRacingAviary(BaseRLAviary):
         vel = state[10:13]
         euler = p.getEulerFromQuaternion(state[3:7])
 
-        # Time penalty (encourage fast completion)
-        reward += self.reward_time_penalty
+        # Gate info
+        gate = self.track.gates[self.current_gate_idx]
+        dist_to_gate = np.linalg.norm(pos - gate.position)
 
-        # Small velocity bonus (reduced to prevent reward hacking)
-        speed = np.linalg.norm(vel)
-        reward += self.reward_velocity_bonus * speed
+        # === PBRS (Potential-Based Reward Shaping) ===
+        # Φ(s) = -distance_to_gate, so closer = higher potential
+        # r_pbrs = γ×Φ(s') - Φ(s) = γ×(-dist_new) - (-dist_old) = dist_old - γ×dist_new
+        if self.prev_dist_to_gate is not None:
+            phi_old = -self.prev_dist_to_gate
+            phi_new = -dist_to_gate
+            pbrs_reward = self.pbrs_gamma * phi_new - phi_old  # = dist_old - γ×dist_new
+            reward += self.pbrs_scale * pbrs_reward
+
+        # === Strong distance penalty ===
+        # Penalize being far from the gate to prevent flying away
+        reward -= self.distance_penalty_scale * dist_to_gate
+
+        # === Directional velocity bonus ===
+        # Only reward velocity TOWARDS the gate, not just any velocity
+        to_gate = gate.position - pos
+        to_gate_norm = to_gate / (np.linalg.norm(to_gate) + 1e-6)
+        velocity_towards_gate = np.dot(vel, to_gate_norm)  # Positive if moving towards gate
+        reward += self.reward_velocity_bonus * max(0, velocity_towards_gate)  # Only positive
+
+        # Time penalty (small)
+        reward += self.reward_time_penalty
 
         # Orientation penalty (penalize excessive tilt)
         tilt = np.abs(euler[0]) + np.abs(euler[1])
         if tilt > 0.5:  # ~30 degrees
             reward += self.reward_orientation_penalty * tilt
 
-        # Gate progress and pass detection
-        gate = self.track.gates[self.current_gate_idx]
-        dist_to_gate = np.linalg.norm(pos - gate.position)
-
-        # Progress reward: reward for getting closer to gate
-        if self.prev_dist_to_gate is not None:
-            progress = self.prev_dist_to_gate - dist_to_gate  # Positive if closer
-            reward += self.reward_progress_bonus * progress
+        # Update previous distance for next PBRS computation
         self.prev_dist_to_gate = dist_to_gate
 
-        # Gate passed bonus (big reward)
+        # === Gate passed bonus (big reward) ===
         if dist_to_gate < self.gate_tolerance:
             # Check if we're on the correct side of the gate
             gate_dir = self._get_gate_direction(gate)
