@@ -215,3 +215,97 @@ Based on research, the best path forward:
 - PBRS reward function committed
 - Need to create SAC training script
 - Need to test if drone now navigates to gates
+
+---
+
+## Entry 6: The Breakthrough - Velocity Control
+**Date: 2026-01-31**
+
+### The Real Problem: Raw Motor RPMs Are Too Hard to Learn
+
+After trying SAC with PBRS, curriculum learning with progressively harder stages, and position-delta actions, nothing worked. The agent kept getting stuck or flying vertically.
+
+**Root cause discovered through research:**
+- `ActionType.RPM` (raw motor commands) requires learning complex motor coordination
+- Hover action [0.5, 0.5, 0.5, 0.5] produces virtually NO movement
+- Agent needs to learn: motor 1 vs motor 3 differential → pitch → forward movement
+- This is too hard to learn from scratch!
+
+### The Solution: ActionType.VEL (Velocity Control)
+
+Based on extensive research of gym-pybullet-drones documentation and successful drone racing papers:
+
+1. **gym-pybullet-drones has ActionType.VEL** which provides velocity commands
+2. **Built-in PID controller** handles motor coordination
+3. Action `[1, 0, 0, 0]` = move forward (intuitive!)
+4. This is similar to how Swift (Nature paper) uses thrust + body rates
+
+### Implementation
+
+Created `train_velocity_control.py`:
+- Uses `ActionType.VEL` instead of `ActionType.RPM`
+- PBRS reward for progress towards gates
+- Velocity alignment bonus
+- Action smoothness penalty
+
+### Results
+
+**Training (200K steps, ~17 minutes):**
+- Best: 2 gates
+- Peak avg: 1.80 gates at 110K steps
+
+**Testing (10 episodes):**
+| Metric | Value |
+|--------|-------|
+| Gates passed | **2/5 consistently** |
+| Horizontal travel | **2.05m** |
+| Vertical travel | **0.15m** |
+| Navigation | **HORIZONTAL** |
+
+### Key Comparison
+
+| Approach | Action Type | Gates | Behavior |
+|----------|-------------|-------|----------|
+| PPO v1 | RPM | 0 | Flies straight up |
+| PPO v2 (PBRS) | RPM | 0 | Still flies up |
+| SAC (PBRS) | RPM | 0 | Freezes |
+| Curriculum | RPM | 0-1 | Stuck at stage 2 |
+| **Velocity Control** | **VEL** | **2** | **Horizontal navigation!** |
+
+### Why This Works
+
+1. **Abstraction**: PID handles motor coordination, agent learns high-level navigation
+2. **Intuitive actions**: [vx, vy, vz, yaw_rate] maps directly to intended movement
+3. **Same as human pilots**: Swift/Nature paper uses thrust + body rates (similar abstraction)
+
+### Lessons Learned
+
+1. **Research first, code second** - spent too long trying to figure out drone RL from first principles
+2. **Action space matters more than reward** - velocity control fixed what no reward tuning could
+3. **Use established solutions** - gym-pybullet-drones already has velocity control built-in!
+
+### Next Steps
+
+1. Extend training to reach all 5 gates
+2. Increase track complexity
+3. Eventually return to direct motor control with imitation learning from velocity controller
+
+### Research Sources
+
+- [gym-pybullet-drones ActionType documentation](https://github.com/utiasDSL/gym-pybullet-drones)
+- [Swift: Champion-level drone racing (Nature 2023)](https://www.nature.com/articles/s41586-023-06419-4)
+- [Dream to Fly: Model-Based RL](https://arxiv.org/html/2501.14377v1)
+
+---
+
+## Performance Summary
+
+| Version | Steps | Reward | Speed | Gates | Movement |
+|---------|-------|--------|-------|-------|----------|
+| Initial | 64 | -102 | 0.15 m/s | 0 | Crash |
+| MAX_RPM fix | 875 | +307 | 5.30 m/s | 0 | Vertical |
+| PPO v1 | 1000 | +930 | 8.8 m/s | 0 | Vertical |
+| PPO v2 | 1000 | +84 | 9.6 m/s | 0 | Vertical |
+| **Velocity Control** | **500** | **+18** | **~1 m/s** | **2** | **Horizontal** |
+
+**First successful horizontal gate navigation achieved!**
