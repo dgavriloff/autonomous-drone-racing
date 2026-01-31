@@ -24,10 +24,20 @@ Camera (24Hz) -> GateNet -> QuAdGate -> EKF (500Hz) -> G&CNet -> Motors
 - **G&CNet**: Neural network controller (src/control/gcnet.py)
 - **MotorMixer**: Thrust/torque to RPM (src/control/motor_mixer.py)
 
+## Environment Setup
+
+**Conda environment**: `drone-racing` (miniconda3)
+
+```bash
+# Activate environment
+source /Users/denisgavriloff/miniconda3/etc/profile.d/conda.sh
+conda activate drone-racing
+```
+
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Install dependencies (if fresh env)
 pip install -e .
 
 # Collect training data
@@ -70,8 +80,12 @@ python -m src.pipeline.vision_racing
 - PID Baseline: 4.97 m/s on monorace_11 (P_xy=1.05)
 - 82.8% of MonoRace record (6.0 m/s)
 
+## Important Lessons
+
+**Frequency matching**: Expert data collection MUST use the same control frequency as inference. Collecting at 240Hz (CtrlAviary default) and running at 500Hz causes immediate crashes because physics timestep affects required motor thrust.
+
 ## TODO
-1. Train GateNet on collected data
+1. ~~Train GateNet on collected data~~
 2. Implement domain randomization for sim-to-real
 3. Fine-tune G&CNet with PPO
 4. Optimize for competition SDK

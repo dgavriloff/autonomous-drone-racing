@@ -67,9 +67,10 @@ class HighFreqRacingAviary(BaseRLAviary):
         include_gate_info: bool = True,
         include_velocity_target: bool = True,
         enable_vision: bool = True,  # Enable vision for pipeline even with KIN obs
-        # Reward settings
-        reward_gate_passed: float = 10.0,
-        reward_velocity_bonus: float = 0.1,
+        # Reward settings (tuned to incentivize gate navigation)
+        reward_gate_passed: float = 100.0,  # Big bonus for gates
+        reward_velocity_bonus: float = 0.01,  # Small velocity bonus
+        reward_progress_bonus: float = 1.0,  # Reward for getting closer to gate
         reward_time_penalty: float = -0.01,
         reward_crash_penalty: float = -100.0,
         reward_orientation_penalty: float = -0.1,
@@ -108,9 +109,11 @@ class HighFreqRacingAviary(BaseRLAviary):
         # Reward weights
         self.reward_gate_passed = reward_gate_passed
         self.reward_velocity_bonus = reward_velocity_bonus
+        self.reward_progress_bonus = reward_progress_bonus
         self.reward_time_penalty = reward_time_penalty
         self.reward_crash_penalty = reward_crash_penalty
         self.reward_orientation_penalty = reward_orientation_penalty
+        self.prev_dist_to_gate = None  # For progress tracking
 
         # Track setup
         self.track = track or self._default_track()
@@ -278,7 +281,7 @@ class HighFreqRacingAviary(BaseRLAviary):
         # Time penalty (encourage fast completion)
         reward += self.reward_time_penalty
 
-        # Velocity bonus (reward moving fast)
+        # Small velocity bonus (reduced to prevent reward hacking)
         speed = np.linalg.norm(vel)
         reward += self.reward_velocity_bonus * speed
 
@@ -287,10 +290,17 @@ class HighFreqRacingAviary(BaseRLAviary):
         if tilt > 0.5:  # ~30 degrees
             reward += self.reward_orientation_penalty * tilt
 
-        # Gate passed bonus
+        # Gate progress and pass detection
         gate = self.track.gates[self.current_gate_idx]
         dist_to_gate = np.linalg.norm(pos - gate.position)
 
+        # Progress reward: reward for getting closer to gate
+        if self.prev_dist_to_gate is not None:
+            progress = self.prev_dist_to_gate - dist_to_gate  # Positive if closer
+            reward += self.reward_progress_bonus * progress
+        self.prev_dist_to_gate = dist_to_gate
+
+        # Gate passed bonus (big reward)
         if dist_to_gate < self.gate_tolerance:
             # Check if we're on the correct side of the gate
             gate_dir = self._get_gate_direction(gate)
@@ -298,6 +308,7 @@ class HighFreqRacingAviary(BaseRLAviary):
             if np.dot(to_gate, gate_dir) < 0:  # Passed through
                 reward += self.reward_gate_passed
                 self._advance_gate()
+                self.prev_dist_to_gate = None  # Reset for new gate
 
         return reward
 
@@ -363,6 +374,7 @@ class HighFreqRacingAviary(BaseRLAviary):
         self.current_gate_idx = 0
         self.gates_passed = 0
         self.episode_steps = 0
+        self.prev_dist_to_gate = None  # Reset progress tracking
 
         for gate in self.track.gates:
             gate.passed = False

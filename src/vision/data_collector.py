@@ -533,7 +533,12 @@ class GateDataset:
         if self.transform:
             rgb = self.transform(rgb)
 
-        return rgb, combined_mask
+        # Convert to PyTorch format: (H, W, C) -> (C, H, W)
+        import torch
+        rgb_tensor = torch.from_numpy(rgb.transpose(2, 0, 1))
+        mask_tensor = torch.from_numpy(combined_mask).unsqueeze(0)  # Add channel dim
+
+        return rgb_tensor, mask_tensor
 
     def _augment(
         self,
@@ -580,7 +585,7 @@ def collect_from_simulation(
     """
     from gym_pybullet_drones.envs import CtrlAviary
     from gym_pybullet_drones.utils.enums import DroneModel, Physics
-    from gym_pybullet_drones.control import DSLPIDControl
+    from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 
     # Default track if none provided
     if track_gates is None:
@@ -605,15 +610,22 @@ def collect_from_simulation(
             height=gate.get("height", 1.0),
         )
 
-    # Create environment with vision
+    # Create environment
     env = CtrlAviary(
         drone_model=DroneModel.CF2X,
         num_drones=1,
         physics=Physics.PYB,
         gui=False,
         record=False,
-        vision_attributes=True,
     )
+
+    # Manually enable vision attributes (CtrlAviary doesn't support vision_attributes param)
+    env.IMG_RES = np.array([64, 48])
+    env.IMG_FRAME_PER_SEC = 24
+    env.IMG_CAPTURE_FREQ = int(env.PYB_FREQ / env.IMG_FRAME_PER_SEC)
+    env.rgb = np.zeros((env.NUM_DRONES, 48, 64, 4))
+    env.dep = np.ones((env.NUM_DRONES, 48, 64))
+    env.seg = np.zeros((env.NUM_DRONES, 48, 64))
 
     # Initialize controller
     ctrl = DSLPIDControl(drone_model=DroneModel.CF2X)

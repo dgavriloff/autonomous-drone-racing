@@ -75,7 +75,7 @@ class GCNet(nn.Module):
         hidden_dims: List[int] = [256, 256],
         use_residual: bool = True,
         dropout: float = 0.0,
-        max_rpm: float = 65535,
+        max_rpm: float = 21702.64,  # CF2X MAX_RPM from gym-pybullet-drones
     ):
         """
         Initialize G&CNet.
@@ -209,7 +209,7 @@ class GCNetDataset(Dataset):
         self,
         states: np.ndarray,
         actions: np.ndarray,
-        max_rpm: float = 65535,
+        max_rpm: float = 21702.64,  # CF2X MAX_RPM from gym-pybullet-drones
     ):
         """
         Initialize dataset.
@@ -524,6 +524,7 @@ class GCNetRLWrapper(nn.Module):
 def collect_expert_data(
     num_steps: int = 100000,
     env_name: str = "racing",
+    ctrl_freq: int = 500,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Collect expert demonstrations using PID controller.
@@ -531,21 +532,28 @@ def collect_expert_data(
     Args:
         num_steps: Number of steps to collect
         env_name: Environment name
+        ctrl_freq: Control frequency in Hz (should match inference frequency)
 
     Returns:
         Tuple of (states, actions) arrays
     """
     from gym_pybullet_drones.envs import CtrlAviary
     from gym_pybullet_drones.utils.enums import DroneModel, Physics
-    from gym_pybullet_drones.control import DSLPIDControl
+    from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 
-    # Create environment
+    # Create environment with specified control frequency
+    # CRITICAL: Must match inference frequency (500Hz for HighFreqRacingAviary)
+    pyb_freq = max(1000, ctrl_freq * 4)  # PyBullet needs 4x control freq minimum
     env = CtrlAviary(
         drone_model=DroneModel.CF2X,
         num_drones=1,
         physics=Physics.PYB,
         gui=False,
+        ctrl_freq=ctrl_freq,
+        pyb_freq=pyb_freq,
     )
+
+    print(f"Expert data collection: ctrl_freq={ctrl_freq}Hz, pyb_freq={pyb_freq}Hz")
 
     # Create controller
     ctrl = DSLPIDControl(drone_model=DroneModel.CF2X)
@@ -614,10 +622,17 @@ def collect_expert_data(
         if np.linalg.norm(pos - gate_pos) < 0.5:
             gate_idx = (gate_idx + 1) % len(gates)
 
-        # Reset if needed
-        if terminated or truncated:
+        # Reset if crashed or out of bounds
+        crashed = pos[2] < 0.05 or pos[2] > 3.0 or np.abs(pos[0]) > 10 or np.abs(pos[1]) > 10
+        if terminated or truncated or crashed:
             obs, info = env.reset()
-            gate_idx = 0
+            # Randomize which gate to target for diversity
+            gate_idx = np.random.randint(0, len(gates))
+            # Skip a few steps to let drone stabilize with hover thrust
+            hover_rpm = 14500  # ~hover
+            hover_action = np.array([[hover_rpm, hover_rpm, hover_rpm, hover_rpm]])
+            for _ in range(50):  # More steps to stabilize
+                obs, _, _, _, _ = env.step(hover_action)
 
         if steps % 10000 == 0:
             print(f"  Collected {steps}/{num_steps} steps")
@@ -645,11 +660,18 @@ def create_gcnet(
     Returns:
         GCNet model
     """
-    model = GCNet()
-
     if pretrained_path is not None:
         checkpoint = torch.load(pretrained_path, map_location="cpu")
+        # Use config from checkpoint if available
+        config = checkpoint.get("config", {})
+        model = GCNet(
+            hidden_dims=config.get("hidden_dims", [256, 256]),
+            use_residual=config.get("use_residual", True),
+            max_rpm=config.get("max_rpm", 21702.64),
+        )
         model.load_state_dict(checkpoint["model_state_dict"])
+    else:
+        model = GCNet()
 
     if device == "auto":
         if torch.cuda.is_available():

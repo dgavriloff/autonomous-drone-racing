@@ -44,7 +44,9 @@ class PipelineConfig:
 
     # Control parameters
     target_velocity: float = 5.0  # m/s
-    max_rpm: float = 65535
+    # MAX_RPM from gym-pybullet-drones Crazyflie 2.x model (~21702)
+    # Based on: sqrt((thrust_to_weight * mass * g) / (4 * kf))
+    max_rpm: float = 21702.64
 
     # Model paths
     gate_net_path: Optional[str] = None
@@ -331,6 +333,59 @@ class VisionRacingPipeline:
 
         return rpms
 
+    def compute_from_ground_truth(
+        self,
+        position: np.ndarray,
+        velocity: np.ndarray,
+        orientation: np.ndarray,
+        angular_velocity: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Compute motor commands from ground truth state (bypasses EKF).
+
+        Args:
+            position: World position [x, y, z]
+            velocity: World velocity [vx, vy, vz]
+            orientation: Quaternion (w, x, y, z)
+            angular_velocity: Body angular rates [wx, wy, wz]
+
+        Returns:
+            Motor RPM commands
+        """
+        # Get current gate target
+        if self.current_gate_idx in self.known_gates:
+            gate_pos, gate_ori = self.known_gates[self.current_gate_idx]
+        else:
+            gate_pos = np.array([5, 0, 1])
+            gate_ori = np.array([1, 0, 0, 0])
+
+        # Compute gate direction
+        R_gate = self._quat_to_rotation_matrix(gate_ori)
+        gate_dir = R_gate[:, 0]
+
+        # Compute velocity target
+        to_gate = gate_pos - position
+        to_gate_norm = to_gate / (np.linalg.norm(to_gate) + 1e-6)
+        vel_target = to_gate_norm * self.config.target_velocity
+
+        # Check gate progress
+        dist_to_gate = np.linalg.norm(position - gate_pos)
+        if dist_to_gate < 0.5:
+            self._advance_gate()
+
+        # Get action from G&CNet
+        rpms = self.gcnet.get_action(
+            position=position,
+            velocity=velocity,
+            orientation=orientation,
+            angular_velocity=angular_velocity,
+            gate_position=gate_pos,
+            gate_direction=gate_dir,
+            velocity_target=vel_target,
+        )
+
+        return rpms
+
     def step(
         self,
         current_time: float,
@@ -492,19 +547,15 @@ class PipelineRunner:
         while step < max_steps:
             current_time = step * self.pipeline.control_dt
 
-            # Get vision at vision frequency
-            rgb_image = None
-            if step % vision_interval == 0:
-                rgb, depth, seg = self.env._getDroneImages(0)
-                rgb_image = rgb
-
-            # Get IMU data (from environment state)
+            # Get ground truth state from environment
             state_dict = self.env.get_state_for_control()
 
-            # Run pipeline step
-            rpms, pipeline_info = self.pipeline.step(
-                current_time=current_time,
-                rgb_image=rgb_image,
+            # Use ground truth state directly (bypass EKF for testing)
+            rpms = self.pipeline.compute_from_ground_truth(
+                position=state_dict["position"],
+                velocity=state_dict["velocity"],
+                orientation=state_dict["orientation"],
+                angular_velocity=state_dict["angular_velocity"],
             )
 
             # Normalize RPMs to [0, 1] for environment
@@ -516,8 +567,8 @@ class PipelineRunner:
             total_reward += reward
 
             # Record data
-            episode_data["positions"].append(pipeline_info["position"])
-            episode_data["velocities"].append(pipeline_info["velocity"])
+            episode_data["positions"].append(state_dict["position"].copy())
+            episode_data["velocities"].append(state_dict["velocity"].copy())
             episode_data["rpms"].append(rpms)
             episode_data["rewards"].append(reward)
 
@@ -533,9 +584,9 @@ class PipelineRunner:
         return {
             "total_reward": total_reward,
             "steps": step,
-            "gates_passed": pipeline_info["gates_passed"],
-            "avg_speed": np.mean(np.linalg.norm(velocities, axis=1)),
-            "max_speed": np.max(np.linalg.norm(velocities, axis=1)),
+            "gates_passed": self.pipeline.gates_passed,
+            "avg_speed": np.mean(np.linalg.norm(velocities, axis=1)) if len(velocities) > 0 else 0.0,
+            "max_speed": np.max(np.linalg.norm(velocities, axis=1)) if len(velocities) > 0 else 0.0,
             "final_position": positions[-1] if len(positions) > 0 else None,
             "episode_data": episode_data,
         }

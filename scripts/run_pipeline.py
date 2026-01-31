@@ -39,9 +39,9 @@ def parse_args():
                         help="Target velocity (m/s)")
 
     # Models
-    parser.add_argument("--gate_net", type=str, default=None,
+    parser.add_argument("--gate_net", type=str, default="models/gate_net/best_model.pt",
                         help="Path to GateNet checkpoint")
-    parser.add_argument("--gcnet", type=str, default=None,
+    parser.add_argument("--gcnet", type=str, default="models/gcnet/best_model.pt",
                         help="Path to G&CNet checkpoint")
 
     # Episode
