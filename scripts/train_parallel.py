@@ -16,7 +16,7 @@ import multiprocessing as mp
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from stable_baselines3 import SAC, PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, VecNormalize
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.utils import set_random_seed
 
@@ -259,6 +259,8 @@ def train(
     print(f"Creating {n_envs} parallel environments...")
     env = SubprocVecEnv([make_env(i, 42, num_gates, radius) for i in range(n_envs)])
     env = VecMonitor(env)
+    # Normalize observations - critical for unbounded obs spaces
+    env = VecNormalize(env, norm_obs=True, norm_reward=False, clip_obs=10.0)
 
     print(f"Observation space: {env.observation_space}")
     print(f"Action space: {env.action_space}")
@@ -266,20 +268,23 @@ def train(
 
     # Create model with larger batch for parallel training
     if algorithm.upper() == "SAC":
+        # CRITICAL FIX: Use fixed entropy coefficient to prevent collapse
+        # Research shows ent_coef="auto" can drop to 0.002 and kill exploration
         model = SAC(
             "MlpPolicy",
             env,
             learning_rate=3e-4,
             buffer_size=1000000,  # Larger buffer for parallel
-            learning_starts=1000,
+            learning_starts=10000,  # More warmup for diverse initial data
             batch_size=512,  # Larger batch
             tau=0.005,
             gamma=0.99,
-            ent_coef="auto",
+            ent_coef=0.1,  # FIXED: Prevent entropy collapse (was "auto")
             verbose=1,
             tensorboard_log="./logs/parallel_vel",
         )
     else:
+        # PPO benefits more from parallel envs and has stable exploration
         model = PPO(
             "MlpPolicy",
             env,
@@ -288,8 +293,9 @@ def train(
             batch_size=512,  # Larger batch
             n_epochs=10,
             gamma=0.99,
-            gae_lambda=0.95,
+            gae_lambda=0.95,  # Better credit assignment for multi-gate
             clip_range=0.2,
+            ent_coef=0.01,  # Encourage exploration
             verbose=1,
             tensorboard_log="./logs/parallel_vel",
         )
@@ -320,7 +326,10 @@ def train(
     # Save
     Path("models/parallel_vel").mkdir(parents=True, exist_ok=True)
     model.save("models/parallel_vel/final")
+    # Save VecNormalize stats for inference
+    env.save("models/parallel_vel/vecnormalize.pkl")
     print("Model saved to models/parallel_vel/final")
+    print("VecNormalize stats saved to models/parallel_vel/vecnormalize.pkl")
 
     env.close()
     return model, progress_cb
