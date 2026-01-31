@@ -72,17 +72,17 @@ class MotorMixer:
         self.config = config
         self.params = params or DroneParams()
 
-        # Compute mixing matrix
-        self._compute_mixing_matrix()
+        # Precompute constants (needed by mixing matrix)
+        self.kf = self.params.kf
+        self.km = self.params.km
+        self.arm = self.params.arm_length
 
         # Compute RPM limits
         self.min_rpm = self.params.min_rpm
         self.max_rpm = self.params.max_rpm
 
-        # Precompute constants
-        self.kf = self.params.kf
-        self.km = self.params.km
-        self.arm = self.params.arm_length
+        # Compute mixing matrix (uses self.arm, self.kf, self.km)
+        self._compute_mixing_matrix()
 
     def _compute_mixing_matrix(self):
         """
