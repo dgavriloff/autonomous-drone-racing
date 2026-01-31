@@ -66,7 +66,7 @@ class VelocityRacingEnv(BaseRLAviary):
         ctrl_freq: int = 48,
         pyb_freq: int = 240,
         gui: bool = False,
-        gate_tolerance: float = 0.3,
+        gate_tolerance: float = 0.5,  # Increased from 0.3 - more forgiving during learning
         max_steps: int = 500,
         reward_gate: float = 50.0,
         reward_progress: float = 2.0,
@@ -102,9 +102,9 @@ class VelocityRacingEnv(BaseRLAviary):
         )
 
     def _observationSpace(self):
-        # Relative observation space (no absolute position - prevents overfitting)
-        # [height, vel(3), euler(3), ang_vel(3), to_gate_dir(3), dist] = 14 dims
-        return spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
+        # Full observation space with position (helps with track layout understanding)
+        # [pos(3), vel(3), euler(3), ang_vel(3), to_gate_dir(3), dist] = 16 dims
+        return spaces.Box(low=-np.inf, high=np.inf, shape=(16,), dtype=np.float32)
 
     def _computeObs(self):
         state = self._getDroneStateVector(0)
@@ -117,9 +117,7 @@ class VelocityRacingEnv(BaseRLAviary):
         to_gate = gate_pos - pos
         dist = np.linalg.norm(to_gate)
         to_gate_dir = to_gate / (dist + 1e-6)
-        # Only keep height (pos[2]) for altitude awareness, not x/y position
-        # This prevents overfitting to specific track coordinates
-        obs = np.concatenate([[pos[2]], vel, euler, ang_vel, to_gate_dir, [dist]])
+        obs = np.concatenate([pos, vel, euler, ang_vel, to_gate_dir, [dist]])
         return obs.astype(np.float32)
 
     def _computeReward(self):
@@ -142,6 +140,10 @@ class VelocityRacingEnv(BaseRLAviary):
         if self.prev_action is not None and hasattr(self, 'last_clipped_action'):
             action_diff = np.linalg.norm(self.last_clipped_action - self.prev_action)
             reward += self.reward_smoothness * action_diff
+
+        # Altitude penalty - encourage staying at gate height
+        altitude_error = abs(pos[2] - gate.position[2])
+        reward -= 0.1 * altitude_error  # Penalize altitude drift
 
         self.prev_dist = dist
 
