@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-Curriculum Learning for Gate Navigation.
+Curriculum Learning with TIGHT tolerance but EASY geometry.
 
-The problem: Agent struggles to learn navigation when gates are 3m away.
-Solution: Start with gates 0.5m away, progressively increase difficulty.
+Philosophy: Don't reward imprecision. Simplify the environment instead.
 
-Curriculum stages:
-1. Stage 1: 1 gate, 0.5m away (learn basic movement toward target)
-2. Stage 2: 2 gates, 1.0m radius (learn sequential navigation)
-3. Stage 3: 3 gates, 1.5m radius (more gates)
-4. Stage 4: 5 gates, 2.0m radius (near-full track)
-5. Stage 5: 5 gates, 3.0m radius (full difficulty)
+Curriculum stages (all with TIGHT 0.5m tolerance):
+1. Small radius (1.0m), 3 gates - gates are close together
+2. Small radius (1.0m), 5 gates - full lap but gates still close
+3. Medium radius (1.25m), 5 gates - gates further apart
+4. Full radius (1.5m), 5 gates - target course
 
-Progression: Move to next stage when avg gates > 80% for 50 episodes.
+The agent learns precision from the start. We make the COURSE easier, not the
+success criteria looser.
 """
 
 import argparse
@@ -20,279 +19,238 @@ import sys
 from pathlib import Path
 import numpy as np
 import time
+import multiprocessing as mp
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from stable_baselines3 import SAC
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+from stable_baselines3.common.utils import set_random_seed
 
-import pybullet as p
-from src.envs.high_freq_racing import HighFreqRacingAviary, TrackConfig, GateConfig
+from scripts.train_parallel import VelocityRacingEnv, create_simple_track
 
 
-def create_curriculum_track(num_gates: int, radius: float) -> TrackConfig:
-    """Create a track with specified gates and radius."""
-    gates = []
-    base_height = 0.5  # Lower height for easier learning
+# Curriculum stages: (radius, num_gates, timesteps_for_stage)
+CURRICULUM = [
+    (1.0, 3, 300000),   # Stage 1: tiny course, 3 gates - easy to complete lap
+    (1.0, 5, 400000),   # Stage 2: tiny course, 5 gates - full lap, still close
+    (1.25, 5, 400000),  # Stage 3: medium course - gates spread out more
+    (1.5, 5, 500000),   # Stage 4: full course - target difficulty
+]
 
-    for i in range(num_gates):
-        angle = 2 * np.pi * i / num_gates
-        next_angle = 2 * np.pi * (i + 1) / num_gates
+# TIGHT tolerance - we want precision from the start
+GATE_TOLERANCE = 0.5  # Half of what we used before
 
-        # Position on circle
-        x = radius * np.cos(angle)
-        y = radius * np.sin(angle)
-        z = base_height
 
-        # Gate faces towards next gate
-        direction = np.array([
-            np.cos(next_angle) - np.cos(angle),
-            np.sin(next_angle) - np.sin(angle),
-            0,
-        ])
-        direction = direction / (np.linalg.norm(direction) + 1e-6)
-        yaw = np.arctan2(direction[1], direction[0])
-        quat = p.getQuaternionFromEuler([0, 0, yaw])
-
-        gates.append(GateConfig(
-            position=np.array([x, y, z]),
-            orientation=np.array(quat),
-        ))
-
-    # Start position: AT the first gate (inside tolerance)
-    start_x = radius * 0.95  # Very close to first gate
-    start_y = 0.0
-    start_z = base_height
-
-    return TrackConfig(
-        name=f"curriculum_{num_gates}g_{radius}m",
-        gates=gates,
-        start_position=np.array([start_x, start_y, start_z]),
-    )
+def make_env(rank, seed, num_gates, radius, max_steps, gate_tolerance):
+    """Create a single environment instance."""
+    def _init():
+        track = create_simple_track(num_gates, radius)
+        env = VelocityRacingEnv(
+            track,
+            gui=False,
+            max_steps=max_steps,
+            gate_tolerance=gate_tolerance,
+        )
+        env.reset(seed=seed + rank)
+        return env
+    set_random_seed(seed)
+    return _init
 
 
 class CurriculumCallback(BaseCallback):
-    """Callback that handles curriculum progression."""
+    """Track progress for curriculum stage."""
 
-    STAGES = [
-        # Gradual progression - teach movement first
-        {"num_gates": 1, "radius": 0.3, "name": "Stage 1: 1 gate, 0.3m (pass immediately)"},
-        {"num_gates": 2, "radius": 0.3, "name": "Stage 2: 2 gates, 0.3m (0.4m between gates)"},
-        {"num_gates": 2, "radius": 0.5, "name": "Stage 3: 2 gates, 0.5m (0.7m between gates)"},
-        {"num_gates": 3, "radius": 0.5, "name": "Stage 4: 3 gates, 0.5m"},
-        {"num_gates": 3, "radius": 0.8, "name": "Stage 5: 3 gates, 0.8m"},
-        {"num_gates": 5, "radius": 1.0, "name": "Stage 6: 5 gates, 1.0m"},
-        {"num_gates": 5, "radius": 2.0, "name": "Stage 7: 5 gates, 2.0m"},
-        {"num_gates": 5, "radius": 3.0, "name": "Stage 8: 5 gates, 3.0m (full)"},
-    ]
-
-    def __init__(self, verbose=1, progress_threshold=0.8, window_size=50):
+    def __init__(self, stage, num_gates, verbose=1):
         super().__init__(verbose)
-        self.current_stage = 0
-        self.progress_threshold = progress_threshold
-        self.window_size = window_size
+        self.stage = stage
+        self.num_gates = num_gates
+        self.best_gates = 0
         self.episode_gates = []
-        self.stage_start_timesteps = 0
-        self.best_gates_ever = 0
+        self.full_laps = 0
 
-    def _on_step(self) -> bool:
-        # Check if episode ended
-        if self.locals.get("dones", [False])[0]:
-            info = self.locals.get("infos", [{}])[0]
-            gates = info.get("gates_passed", 0)
-            max_gates = self.STAGES[self.current_stage]["num_gates"]
-            self.episode_gates.append(gates / max_gates)  # Normalized
+    def _on_step(self):
+        for i, done in enumerate(self.locals.get("dones", [])):
+            if done:
+                info = self.locals.get("infos", [{}])[i]
+                gates = info.get("gates_passed", 0)
+                self.episode_gates.append(gates)
 
-            if gates > self.best_gates_ever:
-                self.best_gates_ever = gates
-                if self.verbose:
-                    print(f"\n*** NEW BEST: {gates} gates! ***")
+                if gates > self.best_gates:
+                    self.best_gates = gates
+                    print(f"\n*** Stage {self.stage}: NEW BEST {gates}/{self.num_gates} gates! ***")
 
-            # Check progression
-            if len(self.episode_gates) >= self.window_size:
-                recent_avg = np.mean(self.episode_gates[-self.window_size:])
+                if gates == self.num_gates:
+                    self.full_laps += 1
 
-                if recent_avg >= self.progress_threshold:
-                    if self.current_stage < len(self.STAGES) - 1:
-                        self._advance_stage()
-
-        # Periodic status
-        if self.num_timesteps % 10000 == 0:
-            stage = self.STAGES[self.current_stage]
-            if len(self.episode_gates) > 0:
-                recent_avg = np.mean(self.episode_gates[-min(50, len(self.episode_gates)):])
-                print(f"\n[{self.num_timesteps}] {stage['name']} | "
-                      f"Avg completion: {recent_avg*100:.1f}% | Best: {self.best_gates_ever}")
+        if self.num_timesteps % 10000 == 0 and self.episode_gates:
+            recent = self.episode_gates[-100:]
+            avg = np.mean(recent)
+            max_recent = max(recent)
+            full_lap_rate = sum(1 for g in recent if g == self.num_gates) / len(recent) * 100
+            print(f"\n[Stage {self.stage}][{self.num_timesteps}] "
+                  f"Avg: {avg:.2f}/{self.num_gates}, Max: {max_recent}, "
+                  f"Full laps: {full_lap_rate:.0f}%")
 
         return True
 
-    def _advance_stage(self):
-        """Advance to next curriculum stage."""
-        self.current_stage += 1
-        stage = self.STAGES[self.current_stage]
 
-        if self.verbose:
-            print(f"\n{'='*60}")
-            print(f"ADVANCING TO {stage['name']}")
-            print(f"{'='*60}\n")
-
-        # Reset tracking for new stage
-        self.episode_gates = []
-        self.stage_start_timesteps = self.num_timesteps
-
-        # Update environment
-        track = create_curriculum_track(stage["num_gates"], stage["radius"])
-        self.training_env.envs[0].track = track
-        self.training_env.envs[0].reset()
-
-
-def create_env(num_gates=1, radius=0.5, gui=False):
-    """Create curriculum environment with tuned rewards."""
-    track = create_curriculum_track(num_gates, radius)
-
-    env = HighFreqRacingAviary(
-        track=track,
-        ctrl_freq=500,
-        pyb_freq=2000,
-        gui=gui,
-        # Tuned rewards for curriculum learning
-        reward_gate_passed=200.0,  # Big bonus for gates
-        reward_velocity_bonus=0.5,  # Encourage movement towards gate
-        reward_progress_bonus=5.0,  # Strong PBRS signal
-        reward_time_penalty=-0.005,  # Smaller time penalty
-        reward_crash_penalty=-20.0,  # Reduced crash penalty
-        max_episode_steps=300,  # Shorter episodes
-        target_velocity=2.0,  # Lower target velocity
-        gate_tolerance=0.25,  # Gate detection radius
-    )
-
-    return Monitor(env)
-
-
-def train(timesteps=500000):
-    """Train with curriculum learning."""
+def train_curriculum(n_envs=16, max_steps=1000, gate_tolerance=0.5):
+    """Train with curriculum: tight tolerance, easy geometry."""
     print("=" * 60)
-    print("CURRICULUM LEARNING FOR GATE NAVIGATION")
+    print("CURRICULUM TRAINING")
+    print("Tight tolerance, easy geometry -> hard geometry")
     print("=" * 60)
+    print(f"Gate tolerance: {gate_tolerance}m (TIGHT - learning precision)")
+    print(f"Parallel envs: {n_envs}")
+    print(f"Max steps: {max_steps}")
     print()
     print("Curriculum stages:")
-    for i, stage in enumerate(CurriculumCallback.STAGES):
-        print(f"  {i+1}. {stage['name']}")
-    print()
-    print(f"Progression: Move to next when >80% gates for 50 episodes")
-    print(f"Total timesteps: {timesteps}")
-    print()
-
-    # Start with Stage 1
-    stage = CurriculumCallback.STAGES[0]
-    env = create_env(stage["num_gates"], stage["radius"])
-
-    print(f"Starting with {stage['name']}")
-    print(f"Observation space: {env.observation_space}")
-    print(f"Action space: {env.action_space}")
+    total_steps = 0
+    for i, (radius, gates, steps) in enumerate(CURRICULUM):
+        total_steps += steps
+        print(f"  Stage {i+1}: radius={radius}m, gates={gates}, steps={steps:,}")
+    print(f"  Total: {total_steps:,} steps")
     print()
 
-    # Create SAC
-    model = SAC(
-        "MlpPolicy",
-        env,
-        learning_rate=3e-4,
-        buffer_size=100000,
-        learning_starts=500,
-        batch_size=256,
-        tau=0.005,
-        gamma=0.99,
-        ent_coef="auto",
-        verbose=1,
-        tensorboard_log="./logs/curriculum",
-    )
+    model = None
+    total_start = time.time()
 
-    # Curriculum callback
-    curriculum_cb = CurriculumCallback(verbose=1)
+    for stage_idx, (radius, num_gates, timesteps) in enumerate(CURRICULUM):
+        stage = stage_idx + 1
+        print()
+        print("=" * 60)
+        print(f"STAGE {stage}: radius={radius}m, gates={num_gates}, tolerance={gate_tolerance}m")
+        print("=" * 60)
 
-    # Train
-    print("Starting training...")
-    start_time = time.time()
+        # Create environments for this stage
+        env = SubprocVecEnv([
+            make_env(i, 42 + stage * 100, num_gates, radius, max_steps, gate_tolerance)
+            for i in range(n_envs)
+        ])
+        env = VecMonitor(env)
 
-    model.learn(
-        total_timesteps=timesteps,
-        callback=curriculum_cb,
-        progress_bar=True,
-    )
+        if model is None:
+            # First stage: create new model
+            model = SAC(
+                "MlpPolicy",
+                env,
+                learning_rate=3e-4,
+                buffer_size=1000000,
+                learning_starts=10000,
+                batch_size=512,
+                tau=0.005,
+                gamma=0.99,
+                ent_coef="auto",
+                verbose=1,
+                tensorboard_log="./logs/curriculum",
+            )
+        else:
+            # Subsequent stages: transfer to new environment
+            model.set_env(env)
 
-    elapsed = time.time() - start_time
-    print(f"\nTraining completed in {elapsed/60:.1f} minutes")
-    print(f"Final stage: {CurriculumCallback.STAGES[curriculum_cb.current_stage]['name']}")
-    print(f"Best gates ever: {curriculum_cb.best_gates_ever}")
+        # Callbacks
+        curriculum_cb = CurriculumCallback(stage, num_gates)
+        checkpoint_cb = CheckpointCallback(
+            save_freq=50000,
+            save_path="models/curriculum",
+            name_prefix=f"stage{stage}",
+        )
 
-    # Save
-    Path("models/curriculum").mkdir(parents=True, exist_ok=True)
-    model.save("models/curriculum/final_model")
-    print("Model saved to models/curriculum/final_model")
+        # Train this stage
+        print(f"Training stage {stage} for {timesteps:,} steps...")
+        start = time.time()
 
-    env.close()
+        model.learn(
+            total_timesteps=timesteps,
+            callback=[curriculum_cb, checkpoint_cb],
+            progress_bar=True,
+            reset_num_timesteps=(stage == 1),  # Only reset on first stage
+        )
 
-    return model, curriculum_cb
+        elapsed = time.time() - start
+        print(f"\nStage {stage} completed in {elapsed/60:.1f} minutes")
+        print(f"Best gates: {curriculum_cb.best_gates}/{num_gates}")
+        print(f"Full laps completed: {curriculum_cb.full_laps}")
 
+        # Save stage checkpoint
+        Path("models/curriculum").mkdir(parents=True, exist_ok=True)
+        stage_path = f"models/curriculum/stage{stage}_final"
+        model.save(stage_path)
+        print(f"Saved to {stage_path}")
 
-def test(model_path="models/curriculum/final_model", num_episodes=10):
-    """Test on full difficulty track."""
+        env.close()
+
+    total_elapsed = time.time() - total_start
+    print()
     print("=" * 60)
-    print("Testing on full difficulty (5 gates, 3m radius)")
+    print(f"CURRICULUM COMPLETE in {total_elapsed/60:.1f} minutes")
     print("=" * 60)
 
+    # Save final model
+    model.save("models/curriculum/final")
+    print("Final model saved to models/curriculum/final")
+
+    return model
+
+
+def test_model(model_path="models/curriculum/final", num_episodes=10, gate_tolerance=0.5):
+    """Test on target course (radius=1.5m, 5 gates)."""
+    print("=" * 60)
+    print(f"Testing on target course (radius=1.5m, 5 gates, tolerance={gate_tolerance}m)")
+    print("=" * 60)
+
+    track = create_simple_track(num_gates=5, radius=1.5)
+    env = VelocityRacingEnv(track, gui=False, max_steps=1000, gate_tolerance=gate_tolerance)
     model = SAC.load(model_path)
-    env = create_env(num_gates=5, radius=3.0)
 
     results = []
     for ep in range(num_episodes):
-        obs, info = env.reset()
+        obs, _ = env.reset()
+        done = False
         total_reward = 0
-        trajectory = []
 
-        while True:
+        while not done:
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env.step(action)
+            obs, reward, term, trunc, info = env.step(action)
             total_reward += reward
-            trajectory.append(info["position"].copy())
-
-            if terminated or truncated:
-                break
+            done = term or trunc
 
         gates = info["gates_passed"]
-        traj = np.array(trajectory)
-        h_dist = np.linalg.norm(traj[-1, :2] - traj[0, :2]) if len(traj) > 1 else 0
-        v_dist = abs(traj[-1, 2] - traj[0, 2]) if len(traj) > 1 else 0
-
-        results.append({"gates": gates, "reward": total_reward, "h": h_dist, "v": v_dist})
-        direction = "HORIZONTAL" if h_dist > v_dist else "VERTICAL"
-        print(f"Episode {ep+1}: {gates}/5 gates, reward={total_reward:.1f}, {direction}")
+        results.append(gates)
+        print(f"Episode {ep+1}: {gates}/5 gates, reward={total_reward:.1f}")
 
     env.close()
 
-    avg_gates = np.mean([r["gates"] for r in results])
-    print(f"\nAverage gates: {avg_gates:.2f}/5")
+    print()
+    print(f"Average: {np.mean(results):.2f}/5 gates")
+    print(f"Max: {max(results)}/5 gates")
+    print(f"Full laps: {sum(1 for g in results if g == 5)}/{num_episodes}")
 
     return results
 
 
 def main():
+    mp.set_start_method('spawn', force=True)
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train", action="store_true")
-    parser.add_argument("--test", action="store_true")
-    parser.add_argument("--timesteps", type=int, default=500000)
+    parser.add_argument("--envs", type=int, default=16)
+    parser.add_argument("--max-steps", type=int, default=1000)
+    parser.add_argument("--tolerance", type=float, default=0.5, help="Gate tolerance (default: 0.5m TIGHT)")
+    parser.add_argument("--test", type=str, default=None, help="Path to model to test")
     args = parser.parse_args()
 
-    if args.train:
-        model, cb = train(timesteps=args.timesteps)
-        print("\nAuto-testing...")
-        test()
-    elif args.test:
-        test()
+    if args.test:
+        test_model(args.test, gate_tolerance=args.tolerance)
     else:
-        train(timesteps=args.timesteps)
-        test()
+        model = train_curriculum(
+            n_envs=args.envs,
+            max_steps=args.max_steps,
+            gate_tolerance=args.tolerance,
+        )
+        print("\nAuto-testing final model...")
+        test_model("models/curriculum/final", gate_tolerance=args.tolerance)
 
 
 if __name__ == "__main__":
