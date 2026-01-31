@@ -102,7 +102,9 @@ class VelocityRacingEnv(BaseRLAviary):
         )
 
     def _observationSpace(self):
-        return spaces.Box(low=-np.inf, high=np.inf, shape=(16,), dtype=np.float32)
+        # Relative observation space (no absolute position - prevents overfitting)
+        # [height, vel(3), euler(3), ang_vel(3), to_gate_dir(3), dist] = 14 dims
+        return spaces.Box(low=-np.inf, high=np.inf, shape=(14,), dtype=np.float32)
 
     def _computeObs(self):
         state = self._getDroneStateVector(0)
@@ -115,7 +117,9 @@ class VelocityRacingEnv(BaseRLAviary):
         to_gate = gate_pos - pos
         dist = np.linalg.norm(to_gate)
         to_gate_dir = to_gate / (dist + 1e-6)
-        obs = np.concatenate([pos, vel, euler, ang_vel, to_gate_dir, [dist]])
+        # Only keep height (pos[2]) for altitude awareness, not x/y position
+        # This prevents overfitting to specific track coordinates
+        obs = np.concatenate([[pos[2]], vel, euler, ang_vel, to_gate_dir, [dist]])
         return obs.astype(np.float32)
 
     def _computeReward(self):
@@ -259,8 +263,7 @@ def train(
     print(f"Creating {n_envs} parallel environments...")
     env = SubprocVecEnv([make_env(i, 42, num_gates, radius) for i in range(n_envs)])
     env = VecMonitor(env)
-    # Normalize observations - critical for unbounded obs spaces
-    env = VecNormalize(env, norm_obs=True, norm_reward=False, clip_obs=10.0)
+    # Note: VecNormalize removed - relative observation space should be more stable
 
     print(f"Observation space: {env.observation_space}")
     print(f"Action space: {env.action_space}")
@@ -326,10 +329,7 @@ def train(
     # Save
     Path("models/parallel_vel").mkdir(parents=True, exist_ok=True)
     model.save("models/parallel_vel/final")
-    # Save VecNormalize stats for inference
-    env.save("models/parallel_vel/vecnormalize.pkl")
     print("Model saved to models/parallel_vel/final")
-    print("VecNormalize stats saved to models/parallel_vel/vecnormalize.pkl")
 
     env.close()
     return model, progress_cb
