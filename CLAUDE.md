@@ -10,8 +10,26 @@ Vision-based autonomous drone racing system for the AI Grand Prix competition by
 
 **Key Requirement:** Camera-only perception (no ground truth state)
 
+## Current Status
+
+| Metric | Value |
+|--------|-------|
+| Best gates | 4/5 |
+| Approach | Velocity control (ActionType.VEL) |
+| Best model | `models/parallel_vel/large_tolerance.zip` |
+| Training | Parallel envs (16x SubprocVecEnv) |
+
 ## Architecture
 
+### Current Working Approach (Velocity Control)
+```
+Observation -> SAC Policy -> Velocity Commands -> PID (internal) -> Motors
+```
+- Uses `ActionType.VEL` which provides velocity abstraction
+- Built-in PID handles motor coordination
+- Action `[vx, vy, vz, yaw_rate]` maps directly to intended movement
+
+### Target Competition Architecture (Vision-Based)
 ```
 Camera (24Hz) -> GateNet -> QuAdGate -> EKF (500Hz) -> G&CNet -> Motors
 ```
@@ -21,8 +39,19 @@ Camera (24Hz) -> GateNet -> QuAdGate -> EKF (500Hz) -> G&CNet -> Motors
 - **QuAdGate**: Corner detection from masks (src/vision/quad_gate.py)
 - **PoseEstimator**: PnP-based gate pose (src/vision/pose_estimator.py)
 - **EKF**: Extended Kalman Filter for state estimation (src/state/ekf.py)
-- **G&CNet**: Neural network controller (src/control/gcnet.py)
+- **G&CNet**: Neural network controller (src/control/gcnet.py) - NOT WORKING with direct RPM
 - **MotorMixer**: Thrust/torque to RPM (src/control/motor_mixer.py)
+
+## Project Files
+
+### Key Documentation
+- **`CLAUDE.md`** (this file): Project overview and instructions
+- **`USING_TRAINING_PC.md`**: How to use the remote training PC via SSH/Tailscale. Use this for long training runs - the PC has an RTX 5080, 64GB RAM, and 24 cores. Always sync code via git before training.
+- **`blogs.md`**: Development blog documenting discoveries, bugs, and solutions. **Add entries here when making significant progress or discoveries.** Follow the existing format with date, problem, solution, and lessons learned.
+
+### Training Scripts
+- **`scripts/train_parallel.py`**: Main training script with parallel envs (16x SubprocVecEnv)
+- **`scripts/test_parallel_model.py`**: Test trained models with configurable tolerance/steps
 
 ## Environment Setup
 
@@ -37,55 +66,63 @@ conda activate drone-racing
 ## Quick Start
 
 ```bash
-# Install dependencies (if fresh env)
-pip install -e .
+# Train with parallel environments (local)
+python scripts/train_parallel.py --timesteps 1000000 --envs 16
 
-# Collect training data
-python scripts/train_gate_net.py --collect_data --num_frames 50000
+# Test the model
+python scripts/test_parallel_model.py --model models/parallel_vel/large_tolerance.zip --episodes 5
 
-# Train GateNet
-python scripts/train_gate_net.py --epochs 10
-
-# Train G&CNet (imitation learning)
-python scripts/train_gcnet.py --phase imitation --collect_data
-
-# Run pipeline
-python scripts/run_pipeline.py --gui
+# Test with GUI visualization
+python scripts/test_parallel_model.py --model models/parallel_vel/large_tolerance.zip --episodes 3
 ```
 
 ## Key Parameters
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Control freq | 500 Hz | Target for competition |
-| Vision freq | 24 Hz | Camera frame rate |
-| Image size | 64x48 | gym-pybullet-drones default |
-| GateNet params | ~400K | Lightweight for real-time |
-| Max RPM | 65535 | Crazyflie 2.X |
+| Control freq | 48 Hz | With velocity abstraction |
+| Physics freq | 240 Hz | PyBullet simulation |
+| Gate tolerance | 0.8m (train) / 1.0m (test) | Larger helps with altitude drift |
+| Max steps | 500 (train) / 1000 (test) | More time to reach later gates |
+| Parallel envs | 16 | ~1200 FPS on training PC |
+| Max RPM | 21702.64 | CF2X actual (NOT 65535) |
 
-## Testing Commands
+## Important Lessons Learned
 
-```bash
-# Test individual modules
-python -m src.vision.gate_net
-python -m src.vision.quad_gate
-python -m src.state.ekf
-python -m src.control.motor_mixer
-python -m src.control.gcnet
-python -m src.envs.high_freq_racing
-python -m src.pipeline.vision_racing
-```
+### 1. Action Space Matters More Than Reward
+Direct motor control (ActionType.RPM) is extremely hard to learn. The agent kept flying straight up regardless of reward shaping. **Velocity control (ActionType.VEL) was the breakthrough** - it provides intuitive `[vx, vy, vz, yaw_rate]` commands while the built-in PID handles motor coordination.
 
-## Current Performance
-- PID Baseline: 4.97 m/s on monorace_11 (P_xy=1.05)
-- 82.8% of MonoRace record (6.0 m/s)
+### 2. Frequency Matching
+Expert data collection MUST use the same control frequency as inference. Collecting at 240Hz and running at 500Hz causes crashes because physics timestep affects required motor thrust.
 
-## Important Lessons
+### 3. MAX_RPM Constant
+gym-pybullet-drones CF2X has MAX_RPM ~21702, NOT 65535. Using wrong value causes 48% thrust loss.
 
-**Frequency matching**: Expert data collection MUST use the same control frequency as inference. Collecting at 240Hz (CtrlAviary default) and running at 500Hz causes immediate crashes because physics timestep affects required motor thrust.
+### 4. Research Recommendations Don't Always Transfer
+Literature suggested: fixed entropy coefficient, relative observations, VecNormalize. **All made things worse for our task.** Always test empirically.
+
+### 5. Altitude Drift is Real
+The drone navigates horizontally but drifts vertically (~0.7m). Solution: larger gate tolerance (0.8m training, 1.0m testing).
+
+### 6. Analyze Trajectories, Not Just Metrics
+Reward curves looked fine, but watching actual position over time revealed the altitude drift problem.
+
+## Current Challenges
+
+### Stuck at 4/5 Gates
+- Gate 5 is near start position (completing the loop)
+- Agent never experienced gate 5 much during training
+- Likely needs curriculum learning on number of gates
+
+### Vision Pipeline Not Integrated
+- Current approach uses ground truth state
+- Competition requires camera-only perception
+- Need to integrate GateNet + EKF with velocity control
 
 ## TODO
 1. ~~Train GateNet on collected data~~
-2. Implement domain randomization for sim-to-real
-3. Fine-tune G&CNet with PPO
-4. Optimize for competition SDK
+2. ~~Get velocity control working~~ (4/5 gates)
+3. Get 5/5 gates (curriculum on gate count?)
+4. Integrate vision pipeline with velocity control
+5. Implement domain randomization for sim-to-real
+6. Optimize for competition SDK
