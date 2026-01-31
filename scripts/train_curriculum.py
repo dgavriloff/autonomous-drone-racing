@@ -60,8 +60,8 @@ def create_curriculum_track(num_gates: int, radius: float) -> TrackConfig:
             orientation=np.array(quat),
         ))
 
-    # Start position: at the first gate (very close!)
-    start_x = radius * 0.9  # Slightly inside the circle
+    # Start position: AT the first gate (inside tolerance)
+    start_x = radius * 0.95  # Very close to first gate
     start_y = 0.0
     start_z = base_height
 
@@ -76,11 +76,15 @@ class CurriculumCallback(BaseCallback):
     """Callback that handles curriculum progression."""
 
     STAGES = [
-        {"num_gates": 1, "radius": 0.5, "name": "Stage 1: 1 gate, 0.5m"},
-        {"num_gates": 2, "radius": 1.0, "name": "Stage 2: 2 gates, 1.0m"},
-        {"num_gates": 3, "radius": 1.5, "name": "Stage 3: 3 gates, 1.5m"},
-        {"num_gates": 5, "radius": 2.0, "name": "Stage 4: 5 gates, 2.0m"},
-        {"num_gates": 5, "radius": 3.0, "name": "Stage 5: 5 gates, 3.0m"},
+        # Gradual progression - teach movement first
+        {"num_gates": 1, "radius": 0.3, "name": "Stage 1: 1 gate, 0.3m (pass immediately)"},
+        {"num_gates": 2, "radius": 0.3, "name": "Stage 2: 2 gates, 0.3m (0.4m between gates)"},
+        {"num_gates": 2, "radius": 0.5, "name": "Stage 3: 2 gates, 0.5m (0.7m between gates)"},
+        {"num_gates": 3, "radius": 0.5, "name": "Stage 4: 3 gates, 0.5m"},
+        {"num_gates": 3, "radius": 0.8, "name": "Stage 5: 3 gates, 0.8m"},
+        {"num_gates": 5, "radius": 1.0, "name": "Stage 6: 5 gates, 1.0m"},
+        {"num_gates": 5, "radius": 2.0, "name": "Stage 7: 5 gates, 2.0m"},
+        {"num_gates": 5, "radius": 3.0, "name": "Stage 8: 5 gates, 3.0m (full)"},
     ]
 
     def __init__(self, verbose=1, progress_threshold=0.8, window_size=50):
@@ -144,7 +148,7 @@ class CurriculumCallback(BaseCallback):
 
 
 def create_env(num_gates=1, radius=0.5, gui=False):
-    """Create curriculum environment."""
+    """Create curriculum environment with tuned rewards."""
     track = create_curriculum_track(num_gates, radius)
 
     env = HighFreqRacingAviary(
@@ -152,14 +156,15 @@ def create_env(num_gates=1, radius=0.5, gui=False):
         ctrl_freq=500,
         pyb_freq=2000,
         gui=gui,
-        reward_gate_passed=100.0,
-        reward_velocity_bonus=0.1,
-        reward_progress_bonus=1.0,
-        reward_time_penalty=-0.01,
-        reward_crash_penalty=-50.0,  # Reduced crash penalty
-        max_episode_steps=500,  # Shorter episodes for faster learning
-        target_velocity=3.0,  # Lower target velocity initially
-        gate_tolerance=0.3,  # Easier gate detection
+        # Tuned rewards for curriculum learning
+        reward_gate_passed=200.0,  # Big bonus for gates
+        reward_velocity_bonus=0.5,  # Encourage movement towards gate
+        reward_progress_bonus=5.0,  # Strong PBRS signal
+        reward_time_penalty=-0.005,  # Smaller time penalty
+        reward_crash_penalty=-20.0,  # Reduced crash penalty
+        max_episode_steps=300,  # Shorter episodes
+        target_velocity=2.0,  # Lower target velocity
+        gate_tolerance=0.25,  # Gate detection radius
     )
 
     return Monitor(env)
