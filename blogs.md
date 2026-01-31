@@ -168,3 +168,50 @@ The challenge is teaching navigation through RL. The agent keeps finding ways to
 | PPO v2 | 1000 | +84 | 9.6 m/s | 0 |
 
 The drone flies great, but still no gates passed. More work needed on navigation.
+
+---
+
+## Entry 5: Parallel Research & PBRS Solution
+**Date: 2026-01-31**
+
+### Research Phase
+
+Launched 4 parallel subagents to explore different approaches:
+
+| Approach | Result |
+|----------|--------|
+| **Aggressive PID Tuning** | 4.97 m/s (1.3% improvement), stable |
+| **RL (PPO)** | 5.41 m/s but only 2/11 gates, crashes |
+| **CasADi Trajectory** | 4.94 m/s, theoretical optimum untrackable |
+| **Racing Lines** | 4.92 m/s, baseline is already optimal |
+
+### Key Insight: PBRS (Potential-Based Reward Shaping)
+
+The RL agent keeps flying up because:
+- Old reward: `+0.01 * speed` rewards ANY velocity
+- Flying up at 9.6 m/s = steady +0.096/step
+- Gate bonus (+100) is one-time and risky
+
+**Solution: PBRS with directional velocity**
+
+PBRS formula: `r_shaped = r + γ×Φ(s') - Φ(s)` where:
+- `Φ(s) = -distance_to_gate` (closer = higher potential)
+- `γ = 0.99` (discount factor)
+
+Key changes:
+1. **PBRS shaping**: Guides towards gates without changing optimal policy
+2. **Distance penalty**: `-0.5 * dist_to_gate` prevents flying away
+3. **Directional velocity**: Only reward velocity TOWARDS gate, not any direction
+
+### Recommended Approach
+
+Based on research, the best path forward:
+1. **Use SAC** instead of PPO (better exploration for local optima)
+2. **PBRS reward** (implemented in high_freq_racing.py)
+3. **Curriculum learning** if still stuck (start gates closer)
+
+### Current Status
+
+- PBRS reward function committed
+- Need to create SAC training script
+- Need to test if drone now navigates to gates
