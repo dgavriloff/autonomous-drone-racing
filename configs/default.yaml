@@ -1,0 +1,120 @@
+# AI Grand Prix - Vision-Based Racing Configuration
+
+# Vision settings
+vision:
+  image_width: 64
+  image_height: 48
+  fps: 24
+  # GateNet architecture
+  gate_net:
+    encoder_channels: [32, 64, 128]
+    decoder_channels: [128, 64, 32]
+    dropout: 0.1
+  # Data augmentation
+  augmentation:
+    enabled: true
+    brightness: 0.2
+    contrast: 0.2
+    saturation: 0.2
+    hue: 0.1
+    noise_std: 0.02
+
+# Gate detection
+gate:
+  # Physical gate dimensions (meters)
+  width: 1.0
+  height: 1.0
+  # Detection thresholds
+  confidence_threshold: 0.5
+  min_contour_area: 100
+  max_corner_distance: 10  # pixels
+
+# State estimation (EKF)
+ekf:
+  # Process noise
+  process_noise:
+    position: 0.01
+    velocity: 0.1
+    orientation: 0.01
+  # Measurement noise
+  measurement_noise:
+    gate_position: 0.05
+    gate_orientation: 0.1
+  # Initial covariance
+  initial_covariance:
+    position: 0.1
+    velocity: 0.5
+    orientation: 0.1
+
+# Control settings
+control:
+  # Frequencies (Hz)
+  ctrl_freq: 500
+  pyb_freq: 2000
+  # Motor limits
+  min_rpm: 0
+  max_rpm: 65535
+  # G&CNet architecture
+  gcnet:
+    hidden_layers: [256, 256]
+    activation: "relu"
+    use_residual: true
+    dropout: 0.0
+
+# Training settings
+training:
+  # Data collection
+  data_collection:
+    num_frames: 50000
+    validation_split: 0.1
+  # GateNet training
+  gate_net:
+    epochs: 10
+    batch_size: 32
+    learning_rate: 0.001
+    weight_decay: 0.0001
+  # G&CNet imitation learning
+  gcnet_imitation:
+    num_steps: 100000
+    batch_size: 256
+    learning_rate: 0.0003
+  # G&CNet RL fine-tuning (PPO)
+  gcnet_rl:
+    total_timesteps: 2000000
+    n_steps: 2048
+    batch_size: 64
+    n_epochs: 10
+    learning_rate: 0.0003
+    clip_range: 0.2
+    ent_coef: 0.01
+    vf_coef: 0.5
+    max_grad_norm: 0.5
+
+# Racing environment
+racing:
+  # Track definition
+  track_name: "monorace_11"
+  num_gates: 11
+  # Episode settings
+  max_episode_steps: 1000
+  gate_tolerance: 0.5  # meters - gate passed if within this distance
+  # Rewards
+  rewards:
+    gate_passed: 10.0
+    velocity_bonus: 0.1  # per m/s
+    time_penalty: -0.01
+    crash_penalty: -100.0
+    orientation_penalty: -0.1
+
+# Drone model (Crazyflie 2.X)
+drone:
+  model: "cf2x"
+  mass: 0.027  # kg
+  arm_length: 0.0397  # meters
+  # Motor constants
+  kf: 3.16e-10  # thrust coefficient
+  km: 7.94e-12  # torque coefficient
+  # Inertia
+  ixx: 1.4e-5
+  iyy: 1.4e-5
+  izz: 2.17e-5
