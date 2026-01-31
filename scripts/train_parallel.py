@@ -66,7 +66,7 @@ class VelocityRacingEnv(BaseRLAviary):
         ctrl_freq: int = 48,
         pyb_freq: int = 240,
         gui: bool = False,
-        gate_tolerance: float = 0.5,  # Increased from 0.3 - more forgiving during learning
+        gate_tolerance: float = 0.8,  # Larger tolerance so agent can pass more gates and learn
         max_steps: int = 500,
         reward_gate: float = 50.0,
         reward_progress: float = 2.0,
@@ -140,10 +140,6 @@ class VelocityRacingEnv(BaseRLAviary):
         if self.prev_action is not None and hasattr(self, 'last_clipped_action'):
             action_diff = np.linalg.norm(self.last_clipped_action - self.prev_action)
             reward += self.reward_smoothness * action_diff
-
-        # Altitude penalty - encourage staying at gate height
-        altitude_error = abs(pos[2] - gate.position[2])
-        reward -= 0.1 * altitude_error  # Penalize altitude drift
 
         self.prev_dist = dist
 
@@ -284,7 +280,7 @@ def train(
             batch_size=512,  # Larger batch
             tau=0.005,
             gamma=0.99,
-            ent_coef=0.1,  # FIXED: Prevent entropy collapse (was "auto")
+            ent_coef="auto",  # Auto-tuning works better for this task
             verbose=1,
             tensorboard_log="./logs/parallel_vel",
         )
