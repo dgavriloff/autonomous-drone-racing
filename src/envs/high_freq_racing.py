@@ -121,8 +121,8 @@ class HighFreqRacingAviary(BaseRLAviary):
         self.pbrs_gamma = 0.99
         self.pbrs_scale = 5.0  # Scale factor for PBRS
 
-        # Strong distance penalty to prevent flying away
-        self.distance_penalty_scale = 0.5  # Penalty per meter from gate
+        # Distance penalty (reduced - PBRS handles guidance better)
+        self.distance_penalty_scale = 0.05  # Small penalty per meter from gate
 
         # Track setup
         self.track = track or self._default_track()
