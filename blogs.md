@@ -422,3 +422,91 @@ The research-driven approach was valuable for **understanding** the problem, but
 | Large Tolerance | 1000 | **4** | Horizontal | 0.8m training, 1.0m test |
 
 **Progress: 0 → 2 → 4 gates. Next target: 5/5 (full lap)**
+
+---
+
+## Entry 8: Curriculum Learning Breakthrough - 5/5 Gates with Precision
+**Date: 2026-01-31**
+
+### The Dilemma
+
+After hitting 4/5 gates consistently, we discovered the agent was overshooting gate 5:
+- Closest approach: 0.90m (tolerance was 0.8m)
+- Agent kept flying past without slowing down
+- Altitude drift: z=0.64 → 1.40 (way too high)
+
+Easy fix: increase tolerance to 1.0m → 80% full laps. But this teaches imprecision.
+
+### The Insight (from user)
+
+> "Don't reward imprecision. Simplify the environment instead."
+
+Three approaches were considered:
+
+1. **Fine-tuning (loose → tight)**: Risk of baking in sloppy habits
+2. **Train from scratch with right objective**: Might not solve exploration
+3. **Curriculum on difficulty**: Keep tight tolerance, simplify the course ✓
+
+The key insight: **top teams don't loosen success criteria - they simplify the environment**.
+
+### Implementation
+
+Curriculum stages (all with **0.5m TIGHT tolerance**):
+
+| Stage | Radius | Gates | Steps | Description |
+|-------|--------|-------|-------|-------------|
+| 1 | 1.0m | 3 | 300K | Tiny course, easy laps |
+| 2 | 1.0m | 5 | 400K | Full lap, gates still close |
+| 3 | 1.25m | 5 | 400K | Medium spread |
+| 4 | 1.5m | 5 | 500K | Target difficulty |
+
+Total: 1.6M steps, ~22 minutes on training PC.
+
+### Results
+
+**Comparison at 0.5m tolerance (tight):**
+
+| Model | Training Tolerance | Full Laps (0.5m test) |
+|-------|-------------------|----------------------|
+| Previous (loose) | 0.8m | **0/10** (only 2 gates!) |
+| **Curriculum (tight)** | 0.5m | **10/10** (100%) |
+
+The previous model learned sloppy habits and couldn't meet tight requirements. The curriculum model learned precision from the start.
+
+**Precision achieved:**
+- Average min distance to gate 5: **0.503m** (tolerance: 0.5m)
+- Hits the boundary exactly, consistently
+
+### Caveat: Speed vs Precision Tradeoff
+
+| Max Steps | Curriculum Model |
+|-----------|------------------|
+| 1000 | 0/10 full laps (runs out of time) |
+| 1500 | 10/10 full laps ✓ |
+
+The agent learned precision but is slower. Training used max_steps=1000, so it didn't optimize for speed. Next step: train with longer episodes.
+
+### Key Lessons
+
+1. **Don't reward imprecision** - loosening tolerance teaches bad habits
+2. **Simplify geometry, not success criteria** - curriculum on course difficulty, not gate tolerance
+3. **Precision transfers, sloppiness doesn't** - the loose model couldn't meet tight requirements later
+4. **Speed and precision are separate objectives** - may need explicit speed reward
+
+### Files Changed
+- `scripts/train_curriculum.py` - New curriculum training script
+- `models/curriculum_final.zip` - Best model (5/5 gates at 0.5m tolerance)
+
+---
+
+## Performance Summary (Updated)
+
+| Version | Tolerance | Max Steps | Gates | Key Change |
+|---------|-----------|-----------|-------|------------|
+| Initial | - | 64 | 0 | Crash |
+| MAX_RPM fix | - | 875 | 0 | Fixed constants |
+| Velocity Control | 0.8m | 500 | 2 | ActionType.VEL |
+| Large Tolerance | 0.8m | 1000 | 4 | Increased tolerance |
+| **Curriculum** | **0.5m** | **1500** | **5** | **Tight tolerance from start** |
+
+**5/5 GATES ACHIEVED with precision (0.5m tolerance)**
