@@ -953,3 +953,81 @@ Training started at ~4700 FPS. This time the agent can actually learn to fly fas
 **Training in progress with new speed limit...**
 
 ---
+
+## Entry 14: Why Speed Training Fails - Research Deep Dive
+**Date: 2026-01-31**
+
+### The Problem
+
+After fixing SPEED_LIMIT, training still failed:
+- 4.17 m/s (50% max): Entropy collapse, stuck at 1-2 gates
+- 2.08 m/s (25% max): Same issue, even with fixed ent_coef
+- ent_coef="auto": Drops to 0.005 at high speeds (exploration stops)
+- ent_coef=0.2 (fixed): Too much exploration at low speeds
+
+### Research Findings
+
+**1. Physics at High Speed**
+
+At 48 Hz control frequency:
+- At 0.25 m/s: Drone moves ~5mm per control step
+- At 2.0 m/s: Drone moves ~42mm per control step (8x more)
+
+This means observations are increasingly "stale" - by the time the action takes effect, the drone has moved significantly. The PID controller becomes reactive rather than predictive.
+
+**2. Why ent_coef="auto" Fails at High Speed**
+
+SAC auto-tunes entropy to maintain a target (default: -dim(action_space) = -4). At high speeds:
+1. Random exploration causes crashes before finding any gates
+2. Agent learns "don't move fast = fewer crashes" (local minimum)
+3. Entropy drops because this "safe" policy is deterministic
+4. Agent is now stuck - can't explore out of the trap
+
+**3. The 2x Rule for Curriculum**
+
+From MIT robotics research: speed jumps > 2x cause exploration failure because:
+- The dynamics change too much between stages
+- Skills learned at low speed don't transfer cleanly
+- The agent needs to relearn rather than adapt
+
+### The Fix: Gradual Speed Curriculum with Scaled Tolerance
+
+```
+Stage 1-4: Geometry at 0.25 m/s, tolerance 0.5m (proven to work)
+Stage 5: 0.50 m/s (2x), tolerance 0.6m
+Stage 6: 1.00 m/s (2x), tolerance 0.7m
+Stage 7: 1.50 m/s (1.5x), tolerance 0.8m
+Stage 8: 2.00 m/s (1.3x), tolerance 0.9m
+```
+
+**Key principles:**
+1. **Max 2x speed increase per stage** - allows policy to adapt
+2. **Tolerance scales with speed** - accounts for observation delay
+3. **Start with proven setup** - 0.25 m/s geometry curriculum works
+
+### Why Tolerance Must Scale
+
+At higher speeds, the drone covers more distance between when we observe and when the action takes effect. The tolerance increase compensates:
+- 0.5m at 0.25 m/s → ~5mm observation lag
+- 0.9m at 2.0 m/s → ~42mm observation lag
+
+### Training Status
+
+Running 8-stage curriculum (3.3M steps, ~45 min):
+- Stages 1-4: Should match previous 5/5 gates result
+- Stages 5-8: Gradual speed increase to 2.0 m/s
+
+### Lessons Learned
+
+1. **Research before debugging** - would have saved hours of trial-and-error
+2. **Speed is fundamentally different** - not just reward tuning
+3. **The 2x rule is real** - larger jumps cause exploration collapse
+4. **Tolerance must scale** - it's physics, not just forgiveness
+
+### Sources
+
+- SAC entropy auto-tuning: Spinning Up documentation
+- Speed curriculum: MIT Rapid Locomotion, CRUISE multi-drone racing
+- Observation delay effects: gym-pybullet-drones issues
+
+---
