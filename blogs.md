@@ -1752,3 +1752,63 @@ RTX 5080 on training PC is **perfect** for Isaac Sim stack. Server GPUs (A100/H1
 5. Train at 20+ m/s
 
 ---
+
+## Entry 24: RTX 5080 Blackwell - Too New for Isaac Sim
+**Date: 2026-02-01**
+
+### The Port Attempt
+
+Followed the plan to port to Isaac Drone Racer (based on Isaac Lab/Isaac Sim). Successfully installed:
+- Python 3.10 venv
+- Isaac Sim 4.5.0
+- Isaac Lab v2.1.0
+- Isaac Drone Racer
+- All dependencies
+
+### The Blocker
+
+```
+NVIDIA GeForce RTX 5080 with CUDA capability sm_120 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_50 sm_60 sm_70 sm_80 sm_86 sm_90.
+```
+
+The RTX 5080 is **Blackwell architecture** (sm_120), which is too new:
+- PyTorch bundled with Isaac Sim 4.5.0 only supports up to **Ada Lovelace (sm_90)**
+- RTX 50 series (Blackwell) = **sm_120** - not yet supported
+- This is a fundamental CUDA kernel compatibility issue
+
+### Hardware Architecture Timeline
+
+| Architecture | Compute Capability | GPU Examples |
+|--------------|-------------------|--------------|
+| Volta | sm_70 | V100 |
+| Turing | sm_75 | RTX 2080 |
+| Ampere | sm_80, sm_86 | A100, RTX 3080 |
+| Ada Lovelace | sm_89, sm_90 | RTX 4090 |
+| **Blackwell** | **sm_120** | **RTX 5080** ← TOO NEW |
+
+### Options
+
+1. **Wait for Isaac Sim 5.2+** with Blackwell support (expected Q1-Q2 2026)
+2. **Use different GPU** - RTX 40 series or older on training PC
+3. **Build PyTorch nightly** from source with sm_120 support (risky, unsupported)
+4. **Stay with gym-pybullet-drones** - works but limited to 8.33 m/s
+
+### Ironically...
+
+The "perfect" RTX 5080 training PC (mentioned in Entry 23 as ideal for Isaac Sim) is actually TOO new. Would have worked better with an RTX 4090.
+
+### Lessons Learned
+
+1. **Bleeding edge hardware ≠ better** - software ecosystem needs to catch up
+2. **Check CUDA compute capability** before planning GPU-dependent ports
+3. **Isaac Sim ecosystem** is tightly coupled to specific PyTorch/CUDA versions
+4. **Training PC works for gym-pybullet-drones** (CPU-based parallelism)
+
+### Current Status
+
+- Aerial Gym/Isaac Sim port: **BLOCKED** on hardware compatibility
+- gym-pybullet-drones: **WORKING** (4.26 m/s, 40% full laps)
+- Options: Wait for software update, swap GPU, or optimize current approach
+
+---
