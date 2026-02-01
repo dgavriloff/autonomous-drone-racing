@@ -31,19 +31,25 @@ from stable_baselines3.common.utils import set_random_seed
 from scripts.train_parallel import VelocityRacingEnv, create_simple_track
 
 
-# Curriculum stages: (radius, num_gates, timesteps_for_stage)
+# Curriculum stages: (radius, num_gates, speed_factor, timesteps_for_stage)
+# Phase 1: Learn gates at slow speed (0.03 = 0.25 m/s)
+# Phase 2: Increase speed while maintaining gates
 CURRICULUM = [
-    (1.0, 3, 300000),   # Stage 1: tiny course, 3 gates - easy to complete lap
-    (1.0, 5, 400000),   # Stage 2: tiny course, 5 gates - full lap, still close
-    (1.25, 5, 400000),  # Stage 3: medium course - gates spread out more
-    (1.5, 5, 500000),   # Stage 4: full course - target difficulty
+    # Phase 1: Geometry curriculum at slow speed
+    (1.0, 3, 0.03, 300000),   # Stage 1: tiny course, 3 gates, slow
+    (1.0, 5, 0.03, 400000),   # Stage 2: tiny course, 5 gates, slow
+    (1.25, 5, 0.03, 400000),  # Stage 3: medium course, slow
+    (1.5, 5, 0.03, 500000),   # Stage 4: full course, slow
+    # Phase 2: Speed curriculum on full course
+    (1.5, 5, 0.10, 400000),   # Stage 5: full course, ~0.83 m/s (3x)
+    (1.5, 5, 0.25, 500000),   # Stage 6: full course, ~2.1 m/s (8x)
 ]
 
 # TIGHT tolerance - we want precision from the start
 GATE_TOLERANCE = 0.5  # Half of what we used before
 
 
-def make_env(rank, seed, num_gates, radius, max_steps, gate_tolerance):
+def make_env(rank, seed, num_gates, radius, max_steps, gate_tolerance, speed_factor=0.03):
     """Create a single environment instance."""
     def _init():
         track = create_simple_track(num_gates, radius)
@@ -52,6 +58,7 @@ def make_env(rank, seed, num_gates, radius, max_steps, gate_tolerance):
             gui=False,
             max_steps=max_steps,
             gate_tolerance=gate_tolerance,
+            speed_factor=speed_factor,
         )
         env.reset(seed=seed + rank)
         return env
@@ -108,25 +115,27 @@ def train_curriculum(n_envs=16, max_steps=1000, gate_tolerance=0.5):
     print()
     print("Curriculum stages:")
     total_steps = 0
-    for i, (radius, gates, steps) in enumerate(CURRICULUM):
+    for i, (radius, gates, speed_factor, steps) in enumerate(CURRICULUM):
         total_steps += steps
-        print(f"  Stage {i+1}: radius={radius}m, gates={gates}, steps={steps:,}")
+        speed_ms = speed_factor * 30 * (1000/3600)  # MAX_SPEED_KMH=30
+        print(f"  Stage {i+1}: radius={radius}m, gates={gates}, speed={speed_ms:.2f}m/s, steps={steps:,}")
     print(f"  Total: {total_steps:,} steps")
     print()
 
     model = None
     total_start = time.time()
 
-    for stage_idx, (radius, num_gates, timesteps) in enumerate(CURRICULUM):
+    for stage_idx, (radius, num_gates, speed_factor, timesteps) in enumerate(CURRICULUM):
         stage = stage_idx + 1
+        speed_ms = speed_factor * 30 * (1000/3600)  # MAX_SPEED_KMH=30
         print()
         print("=" * 60)
-        print(f"STAGE {stage}: radius={radius}m, gates={num_gates}, tolerance={gate_tolerance}m")
+        print(f"STAGE {stage}: radius={radius}m, gates={num_gates}, speed={speed_ms:.2f}m/s, tolerance={gate_tolerance}m")
         print("=" * 60)
 
         # Create environments for this stage
         env = SubprocVecEnv([
-            make_env(i, 42 + stage * 100, num_gates, radius, max_steps, gate_tolerance)
+            make_env(i, 42 + stage * 100, num_gates, radius, max_steps, gate_tolerance, speed_factor)
             for i in range(n_envs)
         ])
         env = VecMonitor(env)
