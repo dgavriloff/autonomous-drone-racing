@@ -1112,3 +1112,105 @@ The exact cause is unclear but likely related to:
 3. Target: 2+ m/s with 5/5 gates
 
 ---
+
+## Entry 16: Speed Curriculum Success - 2.35 m/s Average
+**Date: 2026-01-31**
+
+### The Achievement
+
+Full 8-stage curriculum completed in 58.8 minutes:
+- **80% full laps at 2.0 m/s** (8/10 test episodes)
+- **Max speed: 2.57 m/s**
+- **Average speed: 2.35 m/s**
+- **~10x faster than 0.25 m/s baseline**
+
+### Curriculum Design
+
+Two-phase approach: geometry first, speed second.
+
+**Phase 1 - Geometry (0.25 m/s):**
+| Stage | Radius | Gates | Result |
+|-------|--------|-------|--------|
+| 1 | 1.0m | 3 | Learn basics |
+| 2 | 1.0m | 5 | Full lap, tight course |
+| 3 | 1.25m | 5 | Spread gates |
+| 4 | 1.5m | 5 | Target geometry |
+
+**Phase 2 - Speed (1.5m radius, 5 gates):**
+| Stage | Speed | Tolerance | Full Laps |
+|-------|-------|-----------|-----------|
+| 5 | 0.5 m/s | 0.55m | 85% |
+| 6 | 1.0 m/s | 0.60m | ~60% |
+| 7 | 1.5 m/s | 0.65m | ~40% |
+| 8 | 2.0 m/s | 0.70m | 28%→80% |
+
+### Key Insights
+
+**1. Physics gets harder quadratically with speed**
+
+Centripetal acceleration a = v²/r:
+- At 0.5 m/s: 0.17 m/s²
+- At 2.0 m/s: 2.67 m/s² (16x more!)
+
+The drone must tilt much more aggressively to turn at high speed, increasing crash risk.
+
+**2. Observation delay compounds**
+
+At 48 Hz control (21ms per step):
+- 0.5 m/s → 10mm per step
+- 2.0 m/s → 42mm per step
+
+The policy is "flying blind" for 4x the distance.
+
+**3. The 2x rule held**
+
+Speed jumps were max 2x (0.25→0.5→1.0) then smaller (1.0→1.5→2.0). Larger jumps would have caused exploration collapse.
+
+**4. Tolerance scaling was critical**
+
+Started at 0.5m, scaled to 0.7m at max speed. Accounts for increased observation delay and turning difficulty.
+
+**5. Stage 8 struggled then recovered**
+
+Mid-training at 2.0 m/s:
+- 22% full laps, negative reward, 176-step episodes
+
+End of training:
+- 80% full laps, positive reward, completing laps
+
+The agent needed time to adapt to the physics at max speed.
+
+### Test Results
+
+```
+Episode 1: 5/5 gates, max_speed=2.44m/s
+Episode 2: 5/5 gates, max_speed=2.27m/s
+Episode 3: 5/5 gates, max_speed=2.26m/s
+Episode 4: 3/5 gates, max_speed=2.12m/s  <- crash
+Episode 5: 5/5 gates, max_speed=2.49m/s
+Episode 6: 5/5 gates, max_speed=2.31m/s
+Episode 7: 5/5 gates, max_speed=2.23m/s
+Episode 8: 5/5 gates, max_speed=2.57m/s
+Episode 9: 5/5 gates, max_speed=2.57m/s
+Episode 10: 4/5 gates, max_speed=2.23m/s <- near miss
+
+Average: 4.70/5 gates
+Full laps: 8/10
+Average max speed: 2.35 m/s
+```
+
+### Remaining Challenges
+
+1. **Still 20% failure rate** - crashes at high speed
+2. **Tight track** - 1.5m radius may be too aggressive for 2+ m/s
+3. **Control frequency** - 48 Hz may be insufficient for very high speeds
+4. **No vision yet** - still using ground truth state
+
+### Next Steps
+
+1. **Increase track radius** - try 2.0m or 2.5m for high-speed stages
+2. **More training at stage 8** - 500K steps may not be enough
+3. **Higher control frequency** - 100+ Hz for better precision
+4. **Integrate vision pipeline** - the real competition requirement
+
+---
