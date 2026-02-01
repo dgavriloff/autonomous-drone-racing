@@ -204,7 +204,7 @@ def test_model(model_path="models/curriculum/final", num_episodes=10, gate_toler
 
     track = create_simple_track(num_gates=5, radius=1.5)
     env = VelocityRacingEnv(track, gui=False, max_steps=1000, gate_tolerance=gate_tolerance)
-    model = SAC.load(model_path)
+    model = PPO.load(model_path)
 
     results = []
     for ep in range(num_episodes):
