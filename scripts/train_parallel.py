@@ -91,7 +91,7 @@ class VelocityRacingEnv(BaseRLAviary):
         self.prev_action = None
 
         super().__init__(
-            drone_model=DroneModel.CF2X,
+            drone_model=DroneModel.RACE,  # Racing drone: 830g, 200 km/h max
             num_drones=1,
             initial_xyzs=np.array([track.start_position]),
             initial_rpys=np.zeros((1, 3)),
@@ -104,7 +104,7 @@ class VelocityRacingEnv(BaseRLAviary):
         )
 
         # Override SPEED_LIMIT based on speed_factor
-        # Default 0.03 = 0.25 m/s, 0.06 = 0.5 m/s, 0.12 = 1.0 m/s, etc.
+        # RACE drone: MAX_SPEED_KMH = 200, so speed_factor 0.1 = 5.56 m/s, 0.5 = 27.8 m/s
         self.SPEED_LIMIT = self.speed_factor * self.MAX_SPEED_KMH * (1000/3600)
 
     def _observationSpace(self):

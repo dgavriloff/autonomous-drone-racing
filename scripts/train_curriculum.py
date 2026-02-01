@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-Curriculum Learning: Geometry first, then Speed with Scaled Radius.
+Curriculum Learning: RACE Drone (830g, 200 km/h max)
 
-Phase 1 - Geometry (0.25 m/s, tight tolerance):
-1. Small radius (1.0m), 3 gates
-2. Small radius (1.0m), 5 gates
-3. Medium radius (1.25m), 5 gates
-4. Full radius (1.5m), 5 gates
+Phase 1 - Geometry (~1.7 m/s baseline):
+1. r=1.5m, 3 gates
+2. r=1.5m, 5 gates
+3. r=2.0m, 5 gates
+4. r=2.5m, 5 gates
 
-Phase 2 - Speed with SCALED RADIUS (push to sim limits):
-5.  0.5 m/s, r=1.5m  (a=0.17 m/s²)
-6.  1.0 m/s, r=1.75m (a=0.57 m/s²)
-7.  1.5 m/s, r=2.0m  (a=1.13 m/s²)
-8.  2.0 m/s, r=2.5m  (a=1.60 m/s²)
-9.  2.5 m/s, r=3.0m  (a=2.08 m/s²)
-10. 3.0 m/s, r=3.5m  (a=2.57 m/s²)
-11. 4.0 m/s, r=4.5m  (a=3.56 m/s²)
-12. 5.0 m/s, r=6.0m  (a=4.17 m/s²)
+Phase 2 - Speed with SCALED RADIUS (competition speeds):
+5.  2.8 m/s,  r=2m
+6.  5.6 m/s,  r=3m
+7.  8.3 m/s,  r=4m
+8.  11.1 m/s, r=5m
+9.  15 m/s,   r=7m
+10. 20 m/s,   r=10m  (competition level!)
+11. 25 m/s,   r=15m
+12. 30 m/s,   r=20m  (Swift/MonoRace level!)
 
 Key insights:
-- Speed jumps > 2x cause exploration failure
-- Centripetal acceleration a = v²/r grows quadratically with speed
-- Scaling radius keeps turning difficulty gradual
-- Tolerance scales with speed for observation delay
+- RACE drone has 200 km/h max (55 m/s), not 30 km/h like Crazyflie
+- speed_factor * 200 * (1000/3600) = actual speed in m/s
+- Larger radii needed for high-speed turns (a = v²/r)
+- Target: 20-30 m/s with reliable gate completion
 """
 
 import argparse
@@ -43,29 +43,29 @@ from scripts.train_parallel import VelocityRacingEnv, create_simple_track
 
 
 # Curriculum stages: (radius, num_gates, speed_factor, tolerance, timesteps)
-# speed_factor: fraction of MAX_SPEED_KMH (0.03 = 0.25 m/s, 0.06 = 0.5 m/s, etc.)
-# Phase 1: Geometry curriculum at baseline speed (0.25 m/s)
+# NOW USING RACE DRONE: MAX_SPEED_KMH = 200
+# speed_factor 0.03 = 1.67 m/s (slow baseline for RACE drone)
+# Phase 1: Geometry curriculum at baseline speed
 GEOMETRY_CURRICULUM = [
-    (1.0, 3, 0.03, 0.5, 300000),   # Stage 1: tiny course, 3 gates
-    (1.0, 5, 0.03, 0.5, 400000),   # Stage 2: tiny course, 5 gates
-    (1.25, 5, 0.03, 0.5, 400000),  # Stage 3: medium course
-    (1.5, 5, 0.03, 0.5, 500000),   # Stage 4: full course - geometry complete
+    (1.5, 3, 0.03, 0.6, 300000),   # Stage 1: small course, 3 gates, ~1.7 m/s
+    (1.5, 5, 0.03, 0.6, 400000),   # Stage 2: small course, 5 gates
+    (2.0, 5, 0.03, 0.6, 400000),   # Stage 3: medium course
+    (2.5, 5, 0.03, 0.6, 500000),   # Stage 4: larger course - geometry complete
 ]
 
 # Phase 2: Speed curriculum with SCALED RADIUS
-# Key insight: Centripetal acceleration = v²/r, so radius must grow with v²
-# At constant a_max, r = v²/a_max. We scale radius to keep turning manageable.
-# Max 2x speed jumps, tolerance scales with speed
-# speed_factor: 0.12 = 1.0 m/s, 0.24 = 2.0 m/s, 0.36 = 3.0 m/s, etc.
+# NOW USING RACE DRONE: MAX_SPEED_KMH = 200, so speed_factor maps differently
+# speed_factor * 200 * (1000/3600) = speed in m/s
+# 0.05 = 2.78 m/s, 0.10 = 5.56 m/s, 0.20 = 11.1 m/s, 0.36 = 20 m/s, 0.54 = 30 m/s
 SPEED_CURRICULUM = [
-    (1.5, 5, 0.06, 0.55, 400000),   # Stage 5: 0.5 m/s, a=0.17 m/s²
-    (1.75, 5, 0.12, 0.60, 400000),  # Stage 6: 1.0 m/s, a=0.57 m/s²
-    (2.0, 5, 0.18, 0.65, 500000),   # Stage 7: 1.5 m/s, a=1.13 m/s²
-    (2.5, 5, 0.24, 0.70, 500000),   # Stage 8: 2.0 m/s, a=1.60 m/s²
-    (3.0, 5, 0.30, 0.75, 500000),   # Stage 9: 2.5 m/s, a=2.08 m/s²
-    (3.5, 5, 0.36, 0.80, 500000),   # Stage 10: 3.0 m/s, a=2.57 m/s²
-    (4.5, 5, 0.48, 0.85, 600000),   # Stage 11: 4.0 m/s, a=3.56 m/s²
-    (6.0, 5, 0.60, 0.90, 700000),   # Stage 12: 5.0 m/s, a=4.17 m/s²
+    (2.0, 5, 0.05, 0.6, 400000),    # Stage 5: 2.8 m/s, warmup
+    (3.0, 5, 0.10, 0.7, 400000),    # Stage 6: 5.6 m/s
+    (4.0, 5, 0.15, 0.8, 500000),    # Stage 7: 8.3 m/s
+    (5.0, 5, 0.20, 0.9, 500000),    # Stage 8: 11.1 m/s
+    (7.0, 5, 0.27, 1.0, 500000),    # Stage 9: 15 m/s
+    (10.0, 5, 0.36, 1.2, 600000),   # Stage 10: 20 m/s (competition speed!)
+    (15.0, 5, 0.45, 1.4, 700000),   # Stage 11: 25 m/s
+    (20.0, 5, 0.54, 1.6, 800000),   # Stage 12: 30 m/s (near Swift level!)
 ]
 
 # Combined curriculum
@@ -141,7 +141,7 @@ def train_curriculum(n_envs=16, max_steps=1000, start_stage=1, resume_from=None)
     print("Curriculum stages:")
     total_steps = 0
     for i, (radius, gates, speed_factor, tolerance, steps) in enumerate(CURRICULUM):
-        speed_ms = speed_factor * 30 * (1000/3600)  # MAX_SPEED_KMH ≈ 30
+        speed_ms = speed_factor * 200 * (1000/3600)  # RACE drone MAX_SPEED_KMH = 200
         total_steps += steps
         phase = "Geometry" if i < len(GEOMETRY_CURRICULUM) else "Speed"
         print(f"  Stage {i+1} [{phase}]: radius={radius}m, gates={gates}, "
@@ -160,7 +160,7 @@ def train_curriculum(n_envs=16, max_steps=1000, start_stage=1, resume_from=None)
             print(f"Skipping stage {stage}...")
             continue
 
-        speed_ms = speed_factor * 30 * (1000/3600)
+        speed_ms = speed_factor * 200 * (1000/3600)  # RACE drone
         phase = "Geometry" if stage <= len(GEOMETRY_CURRICULUM) else "Speed"
 
         print()
@@ -247,8 +247,8 @@ def train_curriculum(n_envs=16, max_steps=1000, start_stage=1, resume_from=None)
 
 
 def test_model(model_path="models/curriculum/final", num_episodes=10, gate_tolerance=0.5, speed_factor=0.03):
-    """Test on target course (radius=1.5m, 5 gates)."""
-    speed_ms = speed_factor * 30 * (1000/3600)
+    """Test on target course."""
+    speed_ms = speed_factor * 200 * (1000/3600)  # RACE drone: MAX_SPEED_KMH = 200
     print("=" * 60)
     print(f"Testing on target course (radius=1.5m, 5 gates)")
     print(f"  tolerance={gate_tolerance}m, speed={speed_ms:.2f} m/s")
@@ -300,7 +300,7 @@ def main():
     parser.add_argument("--start-stage", type=int, default=1, help="Start from this stage (default: 1)")
     parser.add_argument("--resume", type=str, default=None, help="Path to model to resume from")
     parser.add_argument("--speed-only", action="store_true", help="Skip geometry, start at speed stage 5")
-    parser.add_argument("--speed-factor", type=float, default=0.60, help="Speed factor for testing (default: 0.60 = 5.0 m/s)")
+    parser.add_argument("--speed-factor", type=float, default=0.36, help="Speed factor for testing (default: 0.36 = 20 m/s for RACE drone)")
     args = parser.parse_args()
 
     if args.test:
@@ -317,8 +317,8 @@ def main():
             start_stage=start_stage,
             resume_from=args.resume,
         )
-        print("\nAuto-testing final model at 5.0 m/s...")
-        test_model("models/curriculum/final", gate_tolerance=0.9, speed_factor=0.60)
+        print("\nAuto-testing final model at 20 m/s...")
+        test_model("models/curriculum/final", gate_tolerance=1.2, speed_factor=0.36)
 
 
 if __name__ == "__main__":
