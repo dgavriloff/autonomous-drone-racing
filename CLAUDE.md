@@ -33,7 +33,7 @@ ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos/autonomous-drone
 | Approach | Velocity control (ActionType.VEL) |
 | Best model | `models/curriculum_final.zip` |
 | Training | Parallel envs (16x SubprocVecEnv) |
-| Speed | 0.25 m/s (needs improvement - competition is 25+ m/s) |
+| Speed | Training with 4.17 m/s limit (was capped at 0.25 m/s by library bug) |
 
 ## Architecture
 
@@ -123,12 +123,18 @@ The drone navigates horizontally but drifts vertically (~0.7m). Solution: larger
 ### 6. Analyze Trajectories, Not Just Metrics
 Reward curves looked fine, but watching actual position over time revealed the altitude drift problem.
 
+### 7. SPEED_LIMIT Bug in gym-pybullet-drones
+The library hardcodes `SPEED_LIMIT = 0.03 * MAX_SPEED_KMH = 0.25 m/s` for velocity control. This caps the drone at 3% of max speed! **Fix:** Override after `super().__init__()`:
+```python
+self.SPEED_LIMIT = 0.5 * self.MAX_SPEED_KMH * (1000/3600)  # ~4.17 m/s
+```
+
 ## Current Challenges
 
-### Speed is Too Slow
-- Current: 0.25 m/s average
-- Competition: 25+ m/s (100x faster!)
-- Need speed-optimized training with lap time rewards
+### Speed Optimization (IN PROGRESS)
+- **Root cause found**: SPEED_LIMIT hardcoded to 0.25 m/s in library
+- **Fix applied**: Override to 4.17 m/s (50% of max)
+- **Training running**: Curriculum retraining with new speed limit
 
 ### Vision Pipeline Blocked
 - DCL SDK not yet released (coming April 2026)
@@ -143,7 +149,8 @@ Reward curves looked fine, but watching actual position over time revealed the a
 1. ~~Train GateNet on collected data~~
 2. ~~Get velocity control working~~ (5/5 gates ✓)
 3. ~~Get 5/5 gates~~ (curriculum learning ✓)
-4. **Speed optimization** (current priority - 0.25 m/s → 10+ m/s)
-5. Harder tracks (more gates, altitude variation)
-6. Domain randomization for sim-to-real
-7. Vision integration (blocked until DCL SDK)
+4. ~~Find speed limit root cause~~ (SPEED_LIMIT bug ✓)
+5. **Speed training** (in progress - 4.17 m/s limit, curriculum retraining)
+6. Harder tracks (more gates, altitude variation)
+7. Domain randomization for sim-to-real
+8. Vision integration (blocked until DCL SDK)
