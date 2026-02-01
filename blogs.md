@@ -1280,3 +1280,66 @@ Average max speed: 2.45 m/s
 This is curriculum learning done right - not just making tolerance looser, but making the *environment* easier in ways that still teach the core skill.
 
 ---
+
+## Entry 18: Hitting the Crazyflie Ceiling - Time for Flightmare
+**Date: 2026-01-31**
+
+### The Problem
+
+Extended curriculum to 5.0 m/s across 12 stages. Results:
+- **Max speed achieved: 8.19 m/s**
+- **Average speed: 6.64 m/s**
+- But only 16% full laps at 5.0 m/s on training track
+
+The issue: **Crazyflie CF2X has a hard speed cap of ~8.3 m/s** (MAX_SPEED_KMH = 30 km/h).
+
+Real racing drones hit **30+ m/s**. We're training a go-kart when we need an F1 car.
+
+### Competition Reality Check
+
+| Platform | Max Speed |
+|----------|-----------|
+| Our Crazyflie sim | 8 m/s |
+| DCL racing drones | 44+ m/s |
+| MonoRace (A2RL 2025 winner) | **28.23 m/s** |
+| Swift (beat world champions) | 20+ m/s |
+
+We're 4-5x slower than what we need.
+
+### Research Findings
+
+Searched for better simulators:
+
+| Simulator | Key Feature |
+|-----------|-------------|
+| **Flightmare** (UZH) | Trained Swift, 200K Hz physics, OpenAI Gym compatible |
+| **Aerial Gym** (NTNU) | Isaac Gym GPU-parallel, 70 km/h demos |
+| **sim2real_drone_racing** | Zero-shot sim2real framework |
+
+### Decision: Switch to Flightmare
+
+**Why Flightmare:**
+1. Same team trained Swift which beat human world champions
+2. OpenAI Gym wrapper + stable-baselines (our current stack)
+3. Flexible drone physics (not locked to Crazyflie)
+4. Proven sim2real transfer pipeline
+
+### What Transfers
+
+Our curriculum learning insights are simulator-agnostic:
+- Geometry first, speed second
+- Scaled radius with speed (a = v²/r)
+- Max 2x speed jumps per stage
+- Tolerance scaling for observation delay
+- PPO with fixed entropy
+
+The *process* transfers. The specific weights don't.
+
+### Next Steps
+
+1. Set up Flightmare on training PC
+2. Port VelocityRacingEnv to Flightmare
+3. Configure racing drone physics (500g+, high thrust-to-weight)
+4. Re-run curriculum at realistic speeds (target: 20+ m/s)
+
+---
