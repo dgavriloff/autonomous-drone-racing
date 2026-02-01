@@ -1343,3 +1343,59 @@ The *process* transfers. The specific weights don't.
 4. Re-run curriculum at realistic speeds (target: 20+ m/s)
 
 ---
+
+## Entry 19: Simulator Research Dead Ends - Custom URDF Path
+**Date: 2026-01-31**
+
+### The Research
+
+Launched parallel agents to investigate Flightmare and Aerial Gym as alternatives to gym-pybullet-drones.
+
+### Flightmare Findings ❌
+
+- Uses `stable_baselines==2.10.1` (TensorFlow 1.x) - NOT stable-baselines3
+- Requires Python 3.6, but pybind11 needs Python 3.8+ → **unresolvable conflict**
+- Unity rendering requires GPU display server - problematic on WSL2
+- Would need massive porting effort to modernize
+
+### Aerial Gym Findings ❌
+
+- Built on Isaac Gym which **doesn't support WSL2**
+- Vulkan/GPU detection fails in Windows Subsystem for Linux
+- No racing environments built-in - would need to build from scratch
+- Isaac Gym is now legacy (NVIDIA recommends Isaac Lab)
+
+### Compatibility Matrix
+
+| Simulator | SB3 Compatible | WSL2 Works | Racing Envs |
+|-----------|---------------|------------|-------------|
+| Flightmare | ❌ TF 1.x | ❌ | ✓ |
+| Aerial Gym | ❌ rl_games | ❌ | ❌ |
+| gym-pybullet-drones | ✓ | ✓ | ✓ (ours) |
+
+### The Pivot
+
+Instead of switching simulators, **modify the drone model** in gym-pybullet-drones:
+
+1. Keep our working codebase (curriculum, training scripts, etc.)
+2. Create a custom racing drone URDF with:
+   - Higher mass (~500g vs 27g Crazyflie)
+   - Much higher thrust (~4kg total vs 0.06kg)
+   - Thrust-to-weight ratio of 8:1 (racing spec)
+   - Higher max RPM
+3. Swap the drone model, retrain
+
+This is the fastest path to realistic speeds while keeping everything else working.
+
+### Lesson Learned
+
+**Don't switch tools when you can modify parameters.** The physics engine (PyBullet) is fine - it's the drone specs that limit us. A URDF file change is hours of work; a simulator port is weeks.
+
+### Next Steps
+
+1. Research racing drone specs (5" quad, ~500g, T-motor specs)
+2. Create custom URDF for gym-pybullet-drones
+3. Update VelocityRacingEnv to use new drone
+4. Re-run curriculum targeting 20+ m/s
+
+---
