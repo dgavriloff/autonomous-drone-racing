@@ -1031,3 +1031,84 @@ Running 8-stage curriculum (3.3M steps, ~45 min):
 - Observation delay effects: gym-pybullet-drones issues
 
 ---
+
+## Entry 15: PPO Solves SAC Entropy Collapse
+**Date: 2026-01-31**
+
+### The Problem
+
+SAC training kept failing on the remote training PC despite:
+- Same code working locally
+- Same library versions
+- Environment tests passing
+
+The entropy coefficient would collapse from 0.9 → 0.001 rapidly, causing the policy to become deterministic before learning anything useful.
+
+### Tried and Failed
+
+| Approach | Result |
+|----------|--------|
+| Fixed ent_coef=0.1 | Too much exploration at low speeds |
+| Fixed ent_coef=0.2 | Same issue |
+| target_entropy=-2 (higher) | Still collapsed |
+| target_entropy=-4 (default) | Collapsed |
+| Reverting to original code | Still collapsed |
+
+### The Solution: Switch to PPO
+
+PPO doesn't use entropy auto-tuning. It has a fixed `ent_coef` parameter that doesn't adapt. This avoids the collapse problem entirely.
+
+```python
+model = PPO(
+    "MlpPolicy",
+    env,
+    learning_rate=3e-4,
+    n_steps=2048,
+    batch_size=64,
+    n_epochs=10,
+    gamma=0.99,
+    gae_lambda=0.95,
+    clip_range=0.2,
+    ent_coef=0.01,  # Fixed entropy, no collapse
+    ...
+)
+```
+
+### Results
+
+| Stage | Gates | Full Laps | Time |
+|-------|-------|-----------|------|
+| 1 (1.0m, 3 gates) | 2/3 avg | 0 | 4.8 min |
+| 2 (1.0m, 5 gates) | 4+/5 avg | 21 | 6.3 min |
+| 3 (1.25m, 5 gates) | 4+/5 avg | 5 | 6.7 min |
+| 4 (1.5m, 5 gates) | 4/5 avg | 0 | 8.5 min |
+
+**Total: 26.3 minutes, 4/5 gates on target course**
+
+Testing: 10/10 episodes at 4/5 gates (consistent but not 5/5)
+
+### Why SAC Failed
+
+SAC's entropy auto-tuning seems to have issues on certain environments/platforms:
+- Works locally (Mac, Python 3.10)
+- Fails on remote (Windows/WSL, Python 3.12)
+
+The exact cause is unclear but likely related to:
+1. Different numerical behavior between Python versions
+2. WSL subprocess handling affecting replay buffer
+3. Random seed differences in parallel environments
+
+### Lessons Learned
+
+1. **PPO is more robust** - no entropy collapse issues
+2. **Local ≠ Remote** - same code can behave differently
+3. **SAC auto-tuning is fragile** - works when it works, hard to debug when it doesn't
+4. **Fixed hyperparameters are more predictable** - PPO's fixed ent_coef just works
+
+### Next Steps
+
+1. Add speed curriculum to PPO training
+2. Gradually increase SPEED_LIMIT while preserving gate completion
+3. Target: 2+ m/s with 5/5 gates
+
+---
