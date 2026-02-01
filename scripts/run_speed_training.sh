@@ -1,16 +1,25 @@
 #!/bin/bash
-# Speed training - test different reward modes
-# Usage: bash run_speed_training.sh [mode]
-# Modes: default, min_speed, massive_lap
+# Speed training - either finetune or train from scratch
+# Usage: bash run_speed_training.sh [finetune|train] [timesteps]
 
-MODE=${1:-min_speed}
+MODE=${1:-finetune}
+TIMESTEPS=${2:-300000}
 
 cd ~/repos/autonomous-drone-racing
 source venv/bin/activate
-echo "Starting training with mode: $MODE"
-python scripts/train_speed.py \
-    --timesteps 300000 \
-    --envs 16 \
-    --target-speed 5.0 \
-    --mode $MODE \
-    2>&1 | tee speed_${MODE}.log
+
+if [ "$MODE" = "finetune" ]; then
+    echo "Fine-tuning curriculum model for speed..."
+    python scripts/finetune_speed.py \
+        --timesteps $TIMESTEPS \
+        --envs 16 \
+        --lr 1e-5 \
+        2>&1 | tee finetune_speed.log
+else
+    echo "Training speed from scratch..."
+    python scripts/train_speed.py \
+        --timesteps $TIMESTEPS \
+        --envs 16 \
+        --target-speed 5.0 \
+        2>&1 | tee speed_train.log
+fi
