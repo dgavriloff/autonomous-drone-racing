@@ -39,20 +39,21 @@ class RacePIDControl(BaseControl):
         # Position control gains (conservative for stability)
         # Original CF2X: P=[.4, .4, 1.25], I=[.05, .05, .05], D=[.2, .2, .5]
         # Scale by sqrt(mass_ratio) for position control (force ~ mass * accel)
-        scale_p = 5.0  # Conservative position control
+        # Use same values as DSLPIDControl - the physics handles the mass difference
+        scale_p = 1.0  # Use original DSL gains
         self.P_COEFF_FOR = np.array([.4, .4, 1.25]) * scale_p
         self.I_COEFF_FOR = np.array([.05, .05, .05]) * scale_p
-        self.D_COEFF_FOR = np.array([.2, .2, .5]) * scale_p * 2.0  # Extra damping
+        self.D_COEFF_FOR = np.array([.2, .2, .5]) * scale_p
 
         # Attitude control gains (scale with inertia ratio)
         # Original CF2X: P=[70000, 70000, 60000], I=[0, 0, 500], D=[20000, 20000, 12000]
-        # CF2X inertia: ~1.4e-5, RACE inertia: ~3.1e-3, ratio ~220
-        # REDUCED: Previous 150x caused roll-pitch coupling instability
-        # Using 20x with heavy D-damping to prevent oscillations
-        inertia_ratio = 20  # Much more conservative
+        # CF2X inertia: ~1.4e-5, RACE inertia: ~3.1e-3, ratio = 222x
+        # CRITICAL: Previous values (20x) were 11x too weak causing roll divergence
+        # Torque = I × α, so need ~222x more torque for same angular acceleration
+        inertia_ratio = 180  # Slightly conservative vs theoretical 222
         self.P_COEFF_TOR = np.array([70000., 70000., 60000.]) * inertia_ratio
-        self.I_COEFF_TOR = np.array([.0, .0, 500.]) * inertia_ratio * 0.2  # Minimal integral
-        self.D_COEFF_TOR = np.array([20000., 20000., 12000.]) * inertia_ratio * 4.0  # Heavy damping
+        self.I_COEFF_TOR = np.array([.0, .0, 500.]) * inertia_ratio * 0.1  # Minimal integral
+        self.D_COEFF_TOR = np.array([20000., 20000., 12000.]) * inertia_ratio * 0.8  # sqrt(inertia_ratio) ≈ 15
 
         # PWM to RPM conversion for RACE drone
         # For hover: thrust = mass * g = 0.830 * 9.8 = 8.134 N
@@ -158,7 +159,7 @@ class RacePIDControl(BaseControl):
         self.integral_pos_e = np.clip(self.integral_pos_e, -2., 2.)
         self.integral_pos_e[2] = np.clip(self.integral_pos_e[2], -0.15, .15)
 
-        # PID thrust computation
+        # PID thrust computation (same as DSLPIDControl)
         target_thrust = (
             np.multiply(self.P_COEFF_FOR, pos_e) +
             np.multiply(self.I_COEFF_FOR, self.integral_pos_e) +
@@ -211,7 +212,9 @@ class RacePIDControl(BaseControl):
             np.multiply(self.D_COEFF_TOR, rpy_rates_e) +
             np.multiply(self.I_COEFF_TOR, self.integral_rpy_e)
         )
-        target_torques = np.clip(target_torques, -3200, 3200)
+        # Scale clipping with inertia ratio (180x) to avoid constant saturation
+        # Original CF2X: ±3200, RACE: ±576000
+        target_torques = np.clip(target_torques, -576000, 576000)
 
         # Mix thrust and torques to get motor PWMs
         pwm = thrust + np.dot(self.MIXER_MATRIX, target_torques)

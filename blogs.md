@@ -1484,3 +1484,271 @@ The custom controller is preserved at `src/control/race_pid_control.py` for futu
 - This is 20-30x improvement over original 0.25 m/s baseline
 
 ---
+
+## Entry 21: RACE Drone Deep Dive - Root Causes Found
+**Date: 2026-02-01**
+
+### Continuing from Entry 20
+
+Went deeper into the RACE drone PID controller issues and identified two major bugs.
+
+### Bug 1: Inertia Ratio Underestimation
+
+**Discovery:**
+- CF2X inertia: ~1.4e-5 kg⋅m²
+- RACE inertia: ~3.1e-3 kg⋅m² (from URDF: ixx/iyy/izz = 0.003113)
+- **Ratio: 222x, NOT ~30x (mass ratio)**
+
+The attitude control gains need to scale with inertia, not mass:
+- Torque = I × α (angular acceleration)
+- For same angular response, need ~222x more torque
+
+**Fix:**
+```python
+inertia_ratio = 180  # Conservative vs theoretical 222
+self.P_COEFF_TOR = np.array([70000., 70000., 60000.]) * inertia_ratio
+```
+
+### Bug 2: Torque Clipping Saturation
+
+**Discovery:**
+With scaled gains (180x), the torque output was always hitting the ±3200 clip limit:
+- P term = 70000 × 180 × 0.1 rad error = 1,260,000
+- Clipped to 3200 → Always saturated!
+
+**Result:** Bang-bang control instead of proportional response.
+
+**Fix:**
+```python
+# Scale clipping with inertia ratio
+target_torques = np.clip(target_torques, -576000, 576000)
+```
+
+### Results After Fixes
+
+**Hover stability:** Perfect (roll/pitch stay at 0.00 rad)
+
+**Forward flight at 20 m/s target:**
+```
+Target: 20 m/s -> Speed: 15.8 m/s, Dist: 57.1m, Alt: 0.50-4.57m [OK]
+```
+
+We achieved 15.8 m/s (57 km/h) with stable roll! But altitude control was poor (climbing to 4.57m vs 0.5m target).
+
+### Remaining Issue: Altitude Drift
+
+When pitched forward for speed, the drone climbs because:
+1. scalar_thrust = dot(target_thrust, body_z_axis)
+2. Body z-axis includes both vertical AND horizontal components when pitched
+3. Horizontal thrust contributes to scalar_thrust, causing excess lift
+
+Tried tilt limiting but it introduced other issues (velocity tracking problems).
+
+### Decision: Partial Success, Move On
+
+**What Works:**
+- RACE drone stable at hover (roll/pitch control fixed)
+- Can achieve ~15 m/s with some altitude error
+- Core insights documented for future work
+
+**What Doesn't:**
+- Clean altitude hold at high speeds (needs thrust compensation)
+- Integration with VelocityRacingEnv (BaseRLAviary rejects RACE)
+
+### For Future Work
+
+To properly use RACE drone with ActionType.VEL:
+1. Create RACEVelocityAviary that uses RacePIDControl
+2. Fix altitude compensation during pitched flight
+3. Or just retrain with new SDK specs when available
+
+### Key Lessons
+
+1. **Torque = Inertia × α** - attitude gains scale with inertia, not mass
+2. **Check clipping limits** - scaled gains need scaled limits
+3. **Thrust projection is tricky** - tilted body affects vertical thrust calculation
+4. **Perfect is enemy of good** - 15 m/s working is better than 30 m/s crashing
+
+---
+
+## Entry 22: Transferable Takeaways & Benchmark Targets
+**Date: 2026-02-01**
+
+### What Transfers to Real Competition
+
+After extensive experimentation, here's what we learned that applies regardless of hardware:
+
+#### 1. Action Abstraction > Raw Control
+- Direct motor RPM control was nearly impossible to learn
+- Velocity abstraction `[vx, vy, vz, yaw_rate]` was the breakthrough
+- **Takeaway:** Use highest-level action space the SDK provides
+
+#### 2. Observation Design Matters
+```
+Gate-relative > Absolute position
+[to_gate_direction, distance_to_gate] is crucial
+```
+Agent needs to know WHERE to go, not just WHERE it is.
+
+#### 3. Curriculum Structure
+```
+Phase 1: Geometry (easy speed, varying track complexity)
+Phase 2: Speed (fixed geometry, increasing velocity)
+```
+Don't try to learn everything at once. Separate spatial from dynamic learning.
+
+#### 4. Tolerance/Reward Balance
+- Tight tolerance (0.3m) = agent never experiences success
+- Loose tolerance (1.0m) = learns sloppy paths
+- **Sweet spot:** Train loose (0.6-0.8m), test tight
+
+### What Doesn't Transfer
+
+| Component | Why It Doesn't Transfer |
+|-----------|------------------------|
+| PID gains | Hardware-specific dynamics |
+| Motor constants | Different motors/props |
+| Model weights | Different obs/action spaces |
+| Control frequency | SDK-dependent |
+
+### Benchmark Landscape
+
+#### Historical ADR Competition Speeds
+| Year | Competition | Top Speed |
+|------|-------------|-----------|
+| 2016 | IROS Daejeon | 0.6 m/s |
+| 2017 | IROS Vancouver | 0.7 m/s |
+| 2018 | IROS Madrid | 2.0 m/s |
+| 2019 | IROS Macau | 2.5 m/s |
+| 2019 | AlphaPilot | 6.8 m/s avg, 9.2 m/s peak |
+| 2023 | Swift (UZH) | **22 m/s**, <6s laps |
+| 2025 | MonoRace (A2RL) | **28.23 m/s**, 16.56s track |
+
+#### Key Benchmarks We Can Target
+
+**1. Swift Track (UZH)**
+- 25×25m arena, 7 square gates
+- Includes Split-S maneuver
+- Champion time: ~5.5s lap
+- Our CF2X max: 8.33 m/s → ~15-20s lap estimate
+
+**2. MonoRace/A2RL Track**
+- 76×18×5.4m track
+- 1.5m gates, speeds >100 km/h
+- Champion time: 16.56s
+- Beyond CF2X capability (needs RACE drone)
+
+**3. UZH Drone Racing Competition**
+- Flightmare simulator
+- Random track generation
+- Metrics: feasibility, success rate, lap time
+- Status: "Coming Soon" - worth monitoring
+
+### Our Current Performance
+
+| Metric | Value | vs Benchmarks |
+|--------|-------|---------------|
+| Max speed (CF2X) | 8.33 m/s | = AlphaPilot peak |
+| Gate accuracy | 5/5 @ 1.67 m/s | Solid |
+| Full lap rate | 99% @ 1.67 m/s | Excellent |
+| Track: 5 gates, r=2m | ~3s lap | Competitive for scale |
+
+### Recommended Next Steps
+
+1. **Implement Swift-style track** (25×25m, 7 gates, Split-S)
+2. **Benchmark lap times** against published results
+3. **Submit to UZH competition** when it opens
+4. **Integrate vision pipeline** for camera-only operation
+
+### Key Papers to Reference
+
+1. [Champion-level drone racing (Swift)](https://www.nature.com/articles/s41586-023-06419-4) - Nature 2023
+2. [MonoRace: Winning A2RL](https://arxiv.org/abs/2601.15222) - Jan 2025
+3. [AlphaPilot: Autonomous Drone Racing](https://link.springer.com/article/10.1007/s10514-021-10011-y)
+4. [UZH-FPV Dataset](https://fpv.ifi.uzh.ch/) - Real racing data
+
+---
+
+## Entry 23: Simulator Research & Port Decision
+**Date: 2026-02-01**
+
+### CF2X Training Final Results
+
+Completed full 12-stage curriculum training:
+
+| Metric | Result |
+|--------|--------|
+| Stages completed | 12/12 |
+| Training time | 22.7 minutes |
+| **Full lap rate** | **40% (4/10)** |
+| Average gates | 3.9/5 |
+| Average max speed | 4.26 m/s |
+
+**Conclusion:** CF2X ceiling reached. 8.33 m/s theoretical max, but model averages 4.26 m/s. Need faster simulator.
+
+### Simulator Research Results
+
+Researched all major drone simulators for competition-level speeds (20-30 m/s):
+
+| Simulator | Status | Speed | Verdict |
+|-----------|--------|-------|---------|
+| **Flightmare** | Dead (2020) | 200k Hz | ❌ Python 3.6, TF 1.14, no velocity control |
+| **AirSim** | Deprecated | Slow | ❌ Microsoft killed it |
+| **Aerial Gym** | Active (Jan 2026) | 38,000x RT | ✅ Proven sim2real |
+| **OmniDrones** | Active (Jan 2026) | 10^5 FPS | ✅ Has racing fork |
+| gym-pybullet-drones | Active | 80x | Current - limited to 8 m/s |
+
+### Key Findings
+
+**Flightmare is NOT viable:**
+- Last update: 2020 (5 years stale)
+- Requires Python 3.6 + TensorFlow 1.14
+- No macOS support
+- No velocity control action space
+- Would need complete rewrite
+
+**Best options for 20+ m/s:**
+
+1. **Aerial Gym** (NTNU)
+   - 38,000x real-time speedup
+   - GPU-accelerated controllers
+   - Proven sim2real transfer
+   - 665 GitHub stars, active development
+
+2. **OmniDrones** (Isaac Sim)
+   - 10^5 FPS on RTX 4090
+   - [TU Delft drone racing fork](https://github.com/ErinTUDelft/OmniDrones-DroneRacing)
+   - 482 stars, active development
+
+### Hardware Note
+
+RTX 5080 on training PC is **perfect** for Isaac Sim stack. Server GPUs (A100/H100) don't work due to lack of RT cores.
+
+### Decision: Port to Aerial Gym
+
+**Why Aerial Gym over OmniDrones:**
+- Simpler setup (Isaac Gym vs full Isaac Sim)
+- Proven sim2real transfer in papers
+- Explicit drone racing support
+- 38,000x speedup means faster iteration
+
+### What Transfers to New Simulator
+
+| Component | Transfers? |
+|-----------|------------|
+| Curriculum structure | ✅ Yes |
+| Reward shaping | ✅ Yes |
+| Observation design | ✅ Yes (gate-relative) |
+| Training scripts (SB3) | ✅ Yes (need wrapper) |
+| Model weights | ❌ No |
+| PID controller | ❌ No (Aerial Gym has its own) |
+
+### Next Steps
+
+1. Install Aerial Gym on training PC (RTX 5080)
+2. Create Gym wrapper for SB3 compatibility
+3. Implement gate racing environment
+4. Port curriculum training
+5. Train at 20+ m/s
+
+---

@@ -154,7 +154,7 @@ def train_curriculum(n_envs=16, max_steps=1000, start_stage=1, resume_from=None)
     print("Curriculum stages:")
     total_steps = 0
     for i, (radius, gates, speed_factor, tolerance, steps) in enumerate(CURRICULUM):
-        speed_ms = speed_factor * 200 * (1000/3600)  # RACE drone MAX_SPEED_KMH = 200
+        speed_ms = speed_factor * 30 * (1000/3600)  # CF2X drone MAX_SPEED_KMH = 30
         total_steps += steps
         phase = "Geometry" if i < len(GEOMETRY_CURRICULUM) else "Speed"
         print(f"  Stage {i+1} [{phase}]: radius={radius}m, gates={gates}, "
@@ -261,7 +261,7 @@ def train_curriculum(n_envs=16, max_steps=1000, start_stage=1, resume_from=None)
 
 def test_model(model_path="models/curriculum/final", num_episodes=10, gate_tolerance=0.5, speed_factor=0.03):
     """Test on target course."""
-    speed_ms = speed_factor * 200 * (1000/3600)  # RACE drone: MAX_SPEED_KMH = 200
+    speed_ms = speed_factor * 30 * (1000/3600)  # CF2X drone: MAX_SPEED_KMH = 30
     print("=" * 60)
     print(f"Testing on target course (radius=1.5m, 5 gates)")
     print(f"  tolerance={gate_tolerance}m, speed={speed_ms:.2f} m/s")
