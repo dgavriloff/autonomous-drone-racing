@@ -1399,3 +1399,88 @@ This is the fastest path to realistic speeds while keeping everything else worki
 4. Re-run curriculum targeting 20+ m/s
 
 ---
+
+## Entry 20: RACE Drone Discovery & PID Tuning Challenges
+**Date: 2026-01-31**
+
+### The Discovery
+
+While researching custom URDFs, discovered gym-pybullet-drones **already has a RACE drone model**!
+
+```
+DroneModel.RACE specs from racer.urdf:
+- Mass: 830g (31x heavier than Crazyflie's 27g)
+- Max speed: 200 km/h (55 m/s!) vs Crazyflie's 30 km/h
+- Thrust-to-weight: 4.17 (vs 2.25 for Crazyflie)
+- kf: 8.47e-9 (27x higher thrust coefficient)
+```
+
+This is exactly what we need for competition speeds!
+
+### The Challenge
+
+The RACE drone doesn't have a PID controller in gym-pybullet-drones:
+```
+[ERROR] in BaseRLAviary.__init()__, no controller is available for the specified drone_model
+[ERROR] in DSLPIDControl.__init()__, DSLPIDControl requires DroneModel.CF2X or DroneModel.CF2P
+```
+
+### Custom Controller Attempt
+
+Created `RacePIDControl` class scaling CF2X gains for RACE drone dynamics:
+- Position gains scaled ~5x
+- Attitude gains scaled ~150x (for inertia ~220x higher)
+- Adjusted PWM2RPM mapping for hover thrust
+
+**Result: Roll instability**
+
+The drone pitches forward correctly but develops uncontrolled roll:
+```
+Step 0:  roll=0.00, pitch=0.003
+Step 15: roll=0.21, pitch=0.60
+Step 25: roll=0.96, pitch=0.73
+Step 29: roll=1.23 → CRASH (flip limit is 1.2 rad)
+```
+
+The PID gains need extensive tuning that's outside our current scope.
+
+### Decision: Stick with CF2X for Now
+
+**Rationale:**
+1. CF2X works reliably up to ~8 m/s
+2. Competition SDK details still unknown - will need retuning anyway
+3. The RL policy learns *navigation skills*, not specific motor commands
+4. Better to have a working baseline than an unstable faster one
+
+### Updated Curriculum for CF2X
+
+```python
+# Speed phase targets (CF2X max ~8.3 m/s)
+Stage 5:  1.67 m/s (radius 2.0m)
+Stage 6:  2.5 m/s (radius 2.5m)
+Stage 7:  3.33 m/s (radius 3.0m)
+Stage 8:  4.17 m/s (radius 4.0m)
+Stage 9:  5.0 m/s (radius 5.0m)
+Stage 10: 5.83 m/s (radius 6.0m)
+Stage 11: 6.67 m/s (radius 7.0m)
+Stage 12: 8.33 m/s (radius 8.0m) ← CF2X max!
+```
+
+### What We Learned
+
+1. **Existing assets > custom builds** - RACE drone was already there
+2. **PID tuning is non-trivial** - attitude control needs careful work
+3. **Roll-pitch coupling** - commanding pitch can induce roll in poorly-tuned controllers
+4. **The policy transfers, not the weights** - when competition SDK arrives, we retrain
+
+### RacePIDControl for Future
+
+The custom controller is preserved at `src/control/race_pid_control.py` for future tuning when we have more time or when competition specs are clearer.
+
+### Current Status
+
+- Training CF2X curriculum on remote PC
+- Target: reliable 5-8 m/s navigation with 5/5 gates
+- This is 20-30x improvement over original 0.25 m/s baseline
+
+---
