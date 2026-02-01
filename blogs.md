@@ -510,3 +510,95 @@ The agent learned precision but is slower. Training used max_steps=1000, so it d
 | **Curriculum** | **0.5m** | **1500** | **5** | **Tight tolerance from start** |
 
 **5/5 GATES ACHIEVED with precision (0.5m tolerance)**
+
+---
+
+## Entry 9: Vision Integration Planning - Testing Policy Robustness
+**Date: 2026-01-31**
+
+### The Challenge
+
+We have 5/5 gates with ground truth state. Competition requires camera-only perception. The architecture:
+
+```
+Current:  Ground Truth State ──→ SAC Policy ──→ Velocity Commands ──→ 5/5 gates
+
+Target:   Camera ──→ GateNet ──→ QuAdGate ──→ PoseEstimator ──→ EKF ──→ SAC Policy
+```
+
+### Research Summary
+
+Researched standard techniques from AlphaPilot, MonoRace (A2RL 2025 winner), and Swift (Nature 2023):
+
+| Component | Standard Approach | Our Implementation |
+|-----------|------------------|-------------------|
+| Gate Detection | CNN corners + PAFs | GateNet (U-Net) + QuAdGate ✓ |
+| Pose Estimation | PnP with known gate dims | PoseEstimator ✓ |
+| State Estimation | EKF fusing IMU (500Hz) + Vision (24Hz) | EKF exists ✓ |
+| Control | Velocity/thrust abstraction | SAC + VEL ✓ |
+| Latency Handling | EKF delay buffer, state prediction | **Missing** |
+
+**Key finding**: Our architecture aligns with winners. G&CNet (RPM output) is unnecessary - SAC velocity control is the right approach.
+
+### The Critical Question
+
+> Can our SAC policy generalize to noisy/delayed state estimates from vision, or will it need retraining?
+
+### Experiment Plan: Test Policy Robustness to State Noise
+
+**Expected EKF noise characteristics** (from literature):
+- Position noise: 5-15cm RMS
+- Velocity noise: 0.1-0.3 m/s RMS
+- Orientation noise: 2-5° RMS
+- Latency: 30-50ms (vision processing delay)
+
+**Test matrix:**
+
+| Test | Pos Noise | Vel Noise | Delay | Prediction |
+|------|-----------|-----------|-------|------------|
+| Baseline | 0 | 0 | 0 | 5/5 gates |
+| Low noise | 0.05m | 0.1 m/s | 0 | 5/5 gates |
+| Med noise | 0.10m | 0.2 m/s | 0 | 4/5 gates |
+| High noise | 0.15m | 0.3 m/s | 0 | 3/5 gates |
+| Med + delay | 0.10m | 0.2 m/s | 2 frames | **2-3/5 gates** |
+
+### Predictions
+
+**Hypothesis**: Latency is the killer, not noise.
+
+At ~2-3 m/s flight speed:
+- 2 frames at 48Hz = ~40ms delay
+- 40ms × 2.5 m/s = **10cm of unaccounted movement**
+
+The policy will:
+1. See stale position → command correction
+2. Drone already moved → overcorrect
+3. Oscillations or missed gates
+
+**Expected outcome**: Policy needs retraining with noise/delay in the loop (observation domain randomization).
+
+### Implementation Plan
+
+**Phase 1: Noise Robustness Testing**
+1. Create `NoisyStateWrapper` - adds Gaussian noise + delay buffer to observations
+2. Test existing model with increasing noise levels
+3. Determine robustness threshold
+
+**Phase 2: Decision Point**
+- If 4+/5 gates at medium noise → proceed to real vision integration
+- If degraded → retrain with observation noise (domain randomization)
+
+**Phase 3: Vision Pipeline Integration**
+1. Connect PoseEstimator output to EKF
+2. Add latency compensation to EKF
+3. Replace ground truth with EKF state in environment
+4. Test full pipeline
+
+### Why This Order
+
+Testing noise robustness BEFORE building full vision integration lets us:
+1. Know if retraining is needed before investing in pipeline work
+2. Understand what noise levels are acceptable
+3. Design EKF tuning targets based on policy requirements
+
+---
