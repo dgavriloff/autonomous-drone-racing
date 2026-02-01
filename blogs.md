@@ -860,3 +860,96 @@ The 0.25 m/s limit appears to be **architectural, not reward-based**:
 - `scripts/run_speed_training.sh` - Updated with modes
 
 ---
+
+## Entry 13: ROOT CAUSE FOUND - SPEED_LIMIT Hardcoded in Library
+**Date: 2026-01-31**
+
+### The Breakthrough
+
+After trying every reward structure and fine-tuning approach, the 0.25 m/s speed ceiling remained. Something architectural had to be capping it.
+
+**Investigation:** Searched gym-pybullet-drones source for velocity limits.
+
+**Found it in `BaseRLAviary.py` line 141:**
+```python
+self.SPEED_LIMIT = 0.03 * self.MAX_SPEED_KMH * (1000/3600)
+```
+
+**Translation:**
+- MAX_SPEED_KMH = 30 km/h = 8.33 m/s
+- SPEED_LIMIT = 0.03 × 8.33 = **0.25 m/s**
+
+The library hardcodes velocity control to 3% of maximum speed! No wonder our reward tuning couldn't break through.
+
+### The Fix
+
+Override SPEED_LIMIT after calling `super().__init__()`:
+
+```python
+super().__init__(
+    drone_model=DroneModel.CF2X,
+    # ... other args
+    act=ActionType.VEL,
+)
+
+# Override the conservative SPEED_LIMIT (default is 0.03 * max = 0.25 m/s)
+# Set to 50% of max speed for faster flight while maintaining control
+self.SPEED_LIMIT = 0.5 * self.MAX_SPEED_KMH * (1000/3600)  # ~4.17 m/s
+```
+
+### Immediate Test Results
+
+Tested old curriculum model with new speed limit:
+
+| Metric | Old Limit (0.25) | New Limit (4.17) |
+|--------|------------------|------------------|
+| Avg speed | 0.25 m/s | **1.54 m/s** |
+| Max speed | 0.45 m/s | **4.15 m/s** |
+| Gates passed | 5/5 | 1/5 |
+
+**6x speed increase immediately!** But gates dropped because the model was calibrated for 0.25 m/s dynamics.
+
+### Why This Matters
+
+The model learned to navigate at 0.25 m/s. At higher speeds:
+- Turning radius increases (physics)
+- Reaction time decreases
+- Gate approach angles change
+
+The policy needs to **relearn** with the higher speed limit from the start.
+
+### Next Step
+
+Retrain curriculum from scratch with new SPEED_LIMIT:
+```bash
+# Now running on training PC
+tmux new-session -d -s training bash scripts/run_speed_training.sh curriculum
+```
+
+Training started at ~4700 FPS. This time the agent can actually learn to fly fast while navigating gates.
+
+### Lessons Learned
+
+1. **Check library defaults** - 3% speed limit is extremely conservative
+2. **Reward tuning can't fix architectural limits** - spent hours on rewards when the cap was in code
+3. **Read the source** - one grep through library source found the issue
+4. **The fix was 1 line** - `self.SPEED_LIMIT = 0.5 * self.MAX_SPEED_KMH * (1000/3600)`
+
+### Files Changed
+
+- `scripts/train_parallel.py` - Added SPEED_LIMIT override to VelocityRacingEnv
+
+---
+
+## Performance Summary (Updated)
+
+| Version | Tolerance | Speed | Gates | Key Change |
+|---------|-----------|-------|-------|------------|
+| Initial | - | 0.15 m/s | 0 | Crash |
+| Velocity Control | 0.8m | 0.25 m/s | 2 | ActionType.VEL |
+| Curriculum | 0.5m | 0.25 m/s | 5 | Tight tolerance |
+| **SPEED_LIMIT fix** | **0.5m** | **TBD** | **TBD** | **4.17 m/s cap** |
+
+**Training in progress with new speed limit...**
+
+---
