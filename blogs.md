@@ -601,4 +601,39 @@ Testing noise robustness BEFORE building full vision integration lets us:
 2. Understand what noise levels are acceptable
 3. Design EKF tuning targets based on policy requirements
 
+### Experimental Results
+
+**Predictions vs Reality:**
+
+| Test | Prediction | Actual | Notes |
+|------|------------|--------|-------|
+| Baseline (no noise) | 5/5 | 5/5 | ✓ |
+| Low (5cm, 0.1m/s, 2°) | 5/5 | 5/5 | ✓ |
+| Medium (10cm, 0.2m/s, 3°) | 4/5 | **5/5** | Better! |
+| High (15cm, 0.3m/s, 5°) | 3/5 | 3.7/5 | Close |
+| Low + 1 frame delay | - | 5/5 | ✓ |
+| Med + 2 frame delay | **2-3/5** | **5/5** | **Way better!** |
+
+**Key Finding: Latency is NOT the killer!**
+
+My hypothesis was wrong. The policy handles 40ms delay (2 frames) perfectly. The velocity control abstraction + PID smooths over stale observations.
+
+**The real threshold**: Position noise of ~10cm is the sweet spot. At 15cm, performance degrades. This gives us a clear EKF accuracy target.
+
+### Updated Decision
+
+| EKF Accuracy | Action |
+|--------------|--------|
+| <10cm position error | ✓ Proceed with vision integration directly |
+| 10-15cm | Borderline, may need minor retraining |
+| >15cm | Need observation domain randomization |
+
+**Recommendation**: Build the vision pipeline. Target <10cm position accuracy in EKF. The policy is more robust than expected.
+
+### Why Was I Wrong?
+
+1. **Velocity control abstraction**: Built-in PID handles stabilization, doesn't need precise state
+2. **Tight tolerance training**: 0.5m training tolerance gave margin for noise
+3. **Smoothing effect**: PID + delay = natural low-pass filter on noisy commands
+
 ---
