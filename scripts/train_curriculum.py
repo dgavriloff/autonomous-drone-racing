@@ -8,11 +8,15 @@ Phase 1 - Geometry (0.25 m/s, tight tolerance):
 3. Medium radius (1.25m), 5 gates
 4. Full radius (1.5m), 5 gates
 
-Phase 2 - Speed with SCALED RADIUS:
-5. 0.5 m/s, r=1.5m  (a=0.17 m/s²)
-6. 1.0 m/s, r=1.75m (a=0.57 m/s²)
-7. 1.5 m/s, r=2.0m  (a=1.13 m/s²)
-8. 2.0 m/s, r=2.5m  (a=1.60 m/s²)
+Phase 2 - Speed with SCALED RADIUS (push to sim limits):
+5.  0.5 m/s, r=1.5m  (a=0.17 m/s²)
+6.  1.0 m/s, r=1.75m (a=0.57 m/s²)
+7.  1.5 m/s, r=2.0m  (a=1.13 m/s²)
+8.  2.0 m/s, r=2.5m  (a=1.60 m/s²)
+9.  2.5 m/s, r=3.0m  (a=2.08 m/s²)
+10. 3.0 m/s, r=3.5m  (a=2.57 m/s²)
+11. 4.0 m/s, r=4.5m  (a=3.56 m/s²)
+12. 5.0 m/s, r=6.0m  (a=4.17 m/s²)
 
 Key insights:
 - Speed jumps > 2x cause exploration failure
@@ -52,11 +56,16 @@ GEOMETRY_CURRICULUM = [
 # Key insight: Centripetal acceleration = v²/r, so radius must grow with v²
 # At constant a_max, r = v²/a_max. We scale radius to keep turning manageable.
 # Max 2x speed jumps, tolerance scales with speed
+# speed_factor: 0.12 = 1.0 m/s, 0.24 = 2.0 m/s, 0.36 = 3.0 m/s, etc.
 SPEED_CURRICULUM = [
-    (1.5, 5, 0.06, 0.55, 400000),  # Stage 5: 0.5 m/s, a=0.17 m/s²
-    (1.75, 5, 0.12, 0.60, 400000), # Stage 6: 1.0 m/s, a=0.57 m/s² (was 0.67)
-    (2.0, 5, 0.18, 0.65, 500000),  # Stage 7: 1.5 m/s, a=1.13 m/s² (was 1.50)
-    (2.5, 5, 0.24, 0.75, 600000),  # Stage 8: 2.0 m/s, a=1.60 m/s² (was 2.67)
+    (1.5, 5, 0.06, 0.55, 400000),   # Stage 5: 0.5 m/s, a=0.17 m/s²
+    (1.75, 5, 0.12, 0.60, 400000),  # Stage 6: 1.0 m/s, a=0.57 m/s²
+    (2.0, 5, 0.18, 0.65, 500000),   # Stage 7: 1.5 m/s, a=1.13 m/s²
+    (2.5, 5, 0.24, 0.70, 500000),   # Stage 8: 2.0 m/s, a=1.60 m/s²
+    (3.0, 5, 0.30, 0.75, 500000),   # Stage 9: 2.5 m/s, a=2.08 m/s²
+    (3.5, 5, 0.36, 0.80, 500000),   # Stage 10: 3.0 m/s, a=2.57 m/s²
+    (4.5, 5, 0.48, 0.85, 600000),   # Stage 11: 4.0 m/s, a=3.56 m/s²
+    (6.0, 5, 0.60, 0.90, 700000),   # Stage 12: 5.0 m/s, a=4.17 m/s²
 ]
 
 # Combined curriculum
@@ -291,7 +300,7 @@ def main():
     parser.add_argument("--start-stage", type=int, default=1, help="Start from this stage (default: 1)")
     parser.add_argument("--resume", type=str, default=None, help="Path to model to resume from")
     parser.add_argument("--speed-only", action="store_true", help="Skip geometry, start at speed stage 5")
-    parser.add_argument("--speed-factor", type=float, default=0.24, help="Speed factor for testing (default: 0.24 = 2.0 m/s)")
+    parser.add_argument("--speed-factor", type=float, default=0.60, help="Speed factor for testing (default: 0.60 = 5.0 m/s)")
     args = parser.parse_args()
 
     if args.test:
@@ -308,8 +317,8 @@ def main():
             start_stage=start_stage,
             resume_from=args.resume,
         )
-        print("\nAuto-testing final model at 2.0 m/s...")
-        test_model("models/curriculum/final", gate_tolerance=0.7, speed_factor=0.24)
+        print("\nAuto-testing final model at 5.0 m/s...")
+        test_model("models/curriculum/final", gate_tolerance=0.9, speed_factor=0.60)
 
 
 if __name__ == "__main__":
