@@ -23,7 +23,7 @@ import multiprocessing as mp
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from stable_baselines3 import SAC
+from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.utils import set_random_seed
@@ -133,17 +133,17 @@ def train_curriculum(n_envs=16, max_steps=1000):
 
         if model is None:
             # First stage: create new model
-            model = SAC(
+            model = PPO(
                 "MlpPolicy",
                 env,
                 learning_rate=3e-4,
-                buffer_size=1000000,
-                learning_starts=10000,
-                batch_size=512,
-                tau=0.005,
+                n_steps=2048,
+                batch_size=64,
+                n_epochs=10,
                 gamma=0.99,
-                ent_coef="auto",
-                target_entropy=-2,  # Higher than default -4 to maintain more exploration
+                gae_lambda=0.95,
+                clip_range=0.2,
+                ent_coef=0.01,  # Fixed entropy, no collapse
                 verbose=1,
                 tensorboard_log="./logs/curriculum",
             )
