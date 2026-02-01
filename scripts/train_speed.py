@@ -90,6 +90,10 @@ class SpeedRacingEnv(BaseRLAviary):
         reward_alignment: float = 0.5,  # Reward for velocity toward gate (was 0.3)
         reward_lap_time: float = 500.0,  # Big bonus for fast lap (was 200)
         reward_crash: float = -200.0,  # Stronger crash penalty (was -100)
+        # Speed training modes
+        reward_mode: str = "default",  # default, min_speed, massive_lap, curriculum
+        min_speed: float = 0.5,  # Min speed for penalty mode
+        min_speed_penalty: float = -1.0,  # Penalty per step below min_speed
     ):
         self.track = track
         self.gate_tolerance = gate_tolerance
@@ -101,6 +105,9 @@ class SpeedRacingEnv(BaseRLAviary):
         self.reward_alignment = reward_alignment
         self.reward_lap_time = reward_lap_time
         self.reward_crash = reward_crash
+        self.reward_mode = reward_mode
+        self.min_speed = min_speed
+        self.min_speed_penalty = min_speed_penalty
 
         self.current_gate = 0
         self.gates_passed = 0
@@ -165,6 +172,15 @@ class SpeedRacingEnv(BaseRLAviary):
         # Only reward speed up to target, diminishing returns above
         speed_bonus = min(speed, self.target_speed) / self.target_speed
         reward += self.reward_speed * speed_bonus
+
+        # 4. Mode-specific rewards
+        if self.reward_mode == "min_speed":
+            # Penalize going too slow
+            if speed < self.min_speed:
+                reward += self.min_speed_penalty
+        elif self.reward_mode == "massive_lap":
+            # Extra alignment bonus - really push toward gate
+            reward += 1.0 * max(0, vel_toward_gate)
 
         self.prev_dist = dist
 
@@ -242,14 +258,17 @@ class SpeedRacingEnv(BaseRLAviary):
         if self.gates_passed >= len(self.track.gates):
             # Bonus inversely proportional to steps taken
             # Max bonus at 200 steps, zero bonus at 1000 steps
-            time_bonus = max(0, 1 - self.step_count / 1000) * self.reward_lap_time
+            lap_bonus = self.reward_lap_time
+            if self.reward_mode == "massive_lap":
+                lap_bonus = 5000.0  # Massive bonus for fast completion
+            time_bonus = max(0, 1 - self.step_count / 1000) * lap_bonus
             reward += time_bonus
 
         info.update(self._computeInfo())
         return obs, reward, terminated, truncated, info
 
 
-def make_env(rank, seed, num_gates, radius, max_steps, gate_tolerance, target_speed):
+def make_env(rank, seed, num_gates, radius, max_steps, gate_tolerance, target_speed, reward_mode="default"):
     """Create a single environment instance."""
     def _init():
         track = create_simple_track(num_gates, radius)
@@ -259,6 +278,7 @@ def make_env(rank, seed, num_gates, radius, max_steps, gate_tolerance, target_sp
             max_steps=max_steps,
             gate_tolerance=gate_tolerance,
             target_speed=target_speed,
+            reward_mode=reward_mode,
         )
         env.reset(seed=seed + rank)
         return env
@@ -317,6 +337,7 @@ def train(
     target_speed=5.0,
     resume_from=None,
     learning_rate=3e-4,
+    reward_mode="default",
 ):
     """Train speed-optimized policy."""
     print("=" * 60)
@@ -329,6 +350,7 @@ def train(
     print(f"Max steps: {max_steps}")
     print(f"Timesteps: {timesteps}")
     print(f"Learning rate: {learning_rate}")
+    print(f"Reward mode: {reward_mode}")
     if resume_from:
         print(f"Resuming from: {resume_from}")
         print("TIP: Use --lr 3e-5 for fine-tuning to avoid catastrophic forgetting")
@@ -336,7 +358,7 @@ def train(
 
     # Create parallel environments
     env = SubprocVecEnv([
-        make_env(i, 42, num_gates, radius, max_steps, gate_tolerance, target_speed)
+        make_env(i, 42, num_gates, radius, max_steps, gate_tolerance, target_speed, reward_mode)
         for i in range(n_envs)
     ])
     env = VecMonitor(env)
@@ -416,6 +438,9 @@ def main():
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--lr", type=float, default=3e-4,
                         help="Learning rate (use 3e-5 for fine-tuning)")
+    parser.add_argument("--mode", type=str, default="default",
+                        choices=["default", "min_speed", "massive_lap"],
+                        help="Reward mode: default, min_speed, massive_lap")
     args = parser.parse_args()
 
     train(
@@ -428,6 +453,7 @@ def main():
         target_speed=args.target_speed,
         resume_from=args.resume,
         learning_rate=args.lr,
+        reward_mode=args.mode,
     )
 
 

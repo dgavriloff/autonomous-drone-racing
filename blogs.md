@@ -736,3 +736,73 @@ Speed ─────► Harder Tracks ─────► Domain Randomization �
 4. Iterate on reward balance
 
 ---
+
+## Entry 11: Speed Training Infrastructure & Reward Design Failures
+**Date: 2026-01-31**
+
+### Training Infrastructure Fixed
+
+**Problem:** Training on remote PC kept terminating via SSH.
+
+**Root causes:**
+1. Using `conda` but training PC has `venv`
+2. Using `nohup` which doesn't survive SSH disconnect in WSL
+3. Using 24 parallel envs (too many)
+
+**Fix:**
+- Use `venv` (`source venv/bin/activate`)
+- Use `tmux` for persistent sessions
+- Use 16 parallel envs (~1330 FPS stable)
+
+**Working command:**
+```bash
+# Create script, then:
+tmux new-session -d -s training bash scripts/run_speed_training.sh
+
+# Monitor:
+tmux capture-pane -t training -p | tail -30
+```
+
+### Speed Optimization Attempts - Both Failed
+
+**Attempt 1: Fine-tuning with new rewards**
+- Resumed from curriculum_final.zip (5/5 gates, 0.25 m/s)
+- Added speed rewards, lap time bonus
+- Result: Gates dropped 5→2, speed unchanged at 0.25 m/s
+- **Cause:** Catastrophic forgetting - model lost navigation while adapting to new rewards
+
+**Attempt 2: Training from scratch**
+- Fresh SAC training with speed-focused rewards
+- 500K steps, 16 envs
+- Result: 2 gates, 0.24 m/s
+- **Cause:** Converged to same local optimum as baseline
+
+### Why Speed Training Fails
+
+**Current reward structure:**
+```python
+reward_gate: 500      # One-time per gate
+reward_speed: 0.1     # Per step, max 0.1 * 500 = 50
+reward_progress: 2.0  # Per step
+reward_alignment: 0.5 # Per step
+```
+
+**The math doesn't work:**
+- Total speed reward: ~50 per episode
+- Gate reward: 500 per gate
+- Model optimizes for gates at slow speed because it's easier/safer
+- Fast flight is risky and not rewarded enough
+
+### Approaches to Try
+
+| Approach | Hypothesis |
+|----------|------------|
+| Min speed penalty | Punish v < 1 m/s to force movement |
+| Massive lap time bonus | Make fast completion worth more than gates |
+| Curriculum | Learn gates first, then add speed pressure |
+
+### Next Steps
+
+Implement and test each approach sequentially on training PC.
+
+---
