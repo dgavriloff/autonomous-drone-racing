@@ -73,6 +73,7 @@ class VelocityRacingEnv(BaseRLAviary):
         reward_velocity: float = 0.2,
         reward_smoothness: float = -0.01,
         reward_crash: float = -50.0,
+        speed_factor: float = 0.03,  # Fraction of MAX_SPEED_KMH for SPEED_LIMIT
     ):
         self.track = track
         self.gate_tolerance = gate_tolerance
@@ -82,6 +83,7 @@ class VelocityRacingEnv(BaseRLAviary):
         self.reward_velocity = reward_velocity
         self.reward_smoothness = reward_smoothness
         self.reward_crash = reward_crash
+        self.speed_factor = speed_factor
         self.current_gate = 0
         self.gates_passed = 0
         self.step_count = 0
@@ -100,6 +102,10 @@ class VelocityRacingEnv(BaseRLAviary):
             obs=ObservationType.KIN,
             act=ActionType.VEL,
         )
+
+        # Override SPEED_LIMIT based on speed_factor
+        # Default 0.03 = 0.25 m/s, 0.06 = 0.5 m/s, 0.12 = 1.0 m/s, etc.
+        self.SPEED_LIMIT = self.speed_factor * self.MAX_SPEED_KMH * (1000/3600)
 
     def _observationSpace(self):
         # Full observation space with position (helps with track layout understanding)
