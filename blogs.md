@@ -806,3 +806,57 @@ reward_alignment: 0.5 # Per step
 Implement and test each approach sequentially on training PC.
 
 ---
+
+## Entry 12: Speed Optimization - The 0.25 m/s Wall
+**Date: 2026-01-31**
+
+### Experiments Run
+
+**1. Reward mode experiments (train from scratch):**
+
+| Mode | Gates | Speed | Result |
+|------|-------|-------|--------|
+| default | 2/5 | 0.24 | Failed - no curriculum |
+| min_speed | 1/5 | 0.06 | Failed - pure penalty |
+| massive_lap | 2/5 | 0.22 | Failed - no curriculum |
+
+**Key insight:** Training from scratch doesn't work. The curriculum approach is necessary.
+
+**2. Fine-tuning curriculum_final (preserves gates):**
+
+| Settings | Gates | Speed | Notes |
+|----------|-------|-------|-------|
+| LR=1e-5, bonus=0.5 | 5/5 | 0.25 | Conservative - stable |
+| LR=3e-5, bonus=2.0 | 5/5 | 0.25 | Aggressive - recovers |
+
+Both preserve 100% gate completion but speed stays at 0.25 m/s.
+
+### Root Cause Analysis
+
+The 0.25 m/s limit appears to be **architectural, not reward-based**:
+
+1. **Velocity control abstraction**: ActionType.VEL has internal limits
+2. **Track geometry**: 1.5m radius requires slow speeds for turns
+3. **PID controller**: Built-in PID may saturate or limit
+
+**Evidence:** max_speed_kmh=30 (8.3 m/s) but actual speed is 0.25 m/s (3% utilization).
+
+### What We Learned
+
+1. **Curriculum is essential** - can't skip it
+2. **Fine-tuning works** - preserves gate completion
+3. **Speed requires architecture change** - not just rewards
+4. **Training infrastructure fixed** - tmux + venv + 16 envs
+
+### Next Steps to Break 0.25 m/s
+
+1. **Direct RPM control** - bypass velocity abstraction
+2. **Larger track radius** - allow higher speeds on straights
+3. **Analyze action outputs** - check if policy hits velocity limits
+4. **Different drone model** - faster max speed
+
+### Files Added
+- `scripts/finetune_speed.py` - Fine-tuning approach (works)
+- `scripts/run_speed_training.sh` - Updated with modes
+
+---
