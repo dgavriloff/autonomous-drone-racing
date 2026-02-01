@@ -31,18 +31,21 @@ from stable_baselines3.common.utils import set_random_seed
 from scripts.train_parallel import VelocityRacingEnv, create_simple_track
 
 
-# Curriculum stages: (radius, num_gates, speed_factor, timesteps_for_stage)
+# Curriculum stages: (radius, num_gates, speed_factor, gate_tolerance, timesteps)
 # Phase 1: Learn gates at slow speed (0.03 = 0.25 m/s)
-# Phase 2: Increase speed while maintaining gates
+# Phase 2: Gradually increase speed with scaled tolerance
+# Research: jumps > 2x cause exploration failure, tolerance should scale with speed
 CURRICULUM = [
-    # Phase 1: Geometry curriculum at slow speed
-    (1.0, 3, 0.03, 300000),   # Stage 1: tiny course, 3 gates, slow
-    (1.0, 5, 0.03, 400000),   # Stage 2: tiny course, 5 gates, slow
-    (1.25, 5, 0.03, 400000),  # Stage 3: medium course, slow
-    (1.5, 5, 0.03, 500000),   # Stage 4: full course, slow
-    # Phase 2: Speed curriculum on full course
-    (1.5, 5, 0.10, 400000),   # Stage 5: full course, ~0.83 m/s (3x)
-    (1.5, 5, 0.25, 500000),   # Stage 6: full course, ~2.1 m/s (8x)
+    # Phase 1: Geometry curriculum at slow speed (0.25 m/s)
+    (1.0, 3, 0.03, 0.5, 300000),   # Stage 1: tiny course, 3 gates
+    (1.0, 5, 0.03, 0.5, 400000),   # Stage 2: tiny course, 5 gates
+    (1.25, 5, 0.03, 0.5, 400000),  # Stage 3: medium course
+    (1.5, 5, 0.03, 0.5, 500000),   # Stage 4: full course
+    # Phase 2: Speed curriculum - gradual increases (max 2x per stage)
+    (1.5, 5, 0.06, 0.6, 400000),   # Stage 5: 0.5 m/s (2x), tolerance +0.1
+    (1.5, 5, 0.12, 0.7, 400000),   # Stage 6: 1.0 m/s (2x), tolerance +0.1
+    (1.5, 5, 0.18, 0.8, 400000),   # Stage 7: 1.5 m/s (1.5x), tolerance +0.1
+    (1.5, 5, 0.24, 0.9, 500000),   # Stage 8: 2.0 m/s (1.3x), tolerance +0.1
 ]
 
 # TIGHT tolerance - we want precision from the start
@@ -103,39 +106,38 @@ class CurriculumCallback(BaseCallback):
         return True
 
 
-def train_curriculum(n_envs=16, max_steps=1000, gate_tolerance=0.5):
-    """Train with curriculum: tight tolerance, easy geometry."""
+def train_curriculum(n_envs=16, max_steps=1000):
+    """Train with curriculum: geometry then speed, with scaled tolerance."""
     print("=" * 60)
     print("CURRICULUM TRAINING")
-    print("Tight tolerance, easy geometry -> hard geometry")
+    print("Geometry curriculum -> Speed curriculum (with scaled tolerance)")
     print("=" * 60)
-    print(f"Gate tolerance: {gate_tolerance}m (TIGHT - learning precision)")
     print(f"Parallel envs: {n_envs}")
     print(f"Max steps: {max_steps}")
     print()
     print("Curriculum stages:")
     total_steps = 0
-    for i, (radius, gates, speed_factor, steps) in enumerate(CURRICULUM):
+    for i, (radius, gates, speed_factor, tolerance, steps) in enumerate(CURRICULUM):
         total_steps += steps
         speed_ms = speed_factor * 30 * (1000/3600)  # MAX_SPEED_KMH=30
-        print(f"  Stage {i+1}: radius={radius}m, gates={gates}, speed={speed_ms:.2f}m/s, steps={steps:,}")
+        print(f"  Stage {i+1}: r={radius}m, g={gates}, v={speed_ms:.2f}m/s, tol={tolerance}m, steps={steps:,}")
     print(f"  Total: {total_steps:,} steps")
     print()
 
     model = None
     total_start = time.time()
 
-    for stage_idx, (radius, num_gates, speed_factor, timesteps) in enumerate(CURRICULUM):
+    for stage_idx, (radius, num_gates, speed_factor, stage_tolerance, timesteps) in enumerate(CURRICULUM):
         stage = stage_idx + 1
         speed_ms = speed_factor * 30 * (1000/3600)  # MAX_SPEED_KMH=30
         print()
         print("=" * 60)
-        print(f"STAGE {stage}: radius={radius}m, gates={num_gates}, speed={speed_ms:.2f}m/s, tolerance={gate_tolerance}m")
+        print(f"STAGE {stage}: radius={radius}m, gates={num_gates}, speed={speed_ms:.2f}m/s, tolerance={stage_tolerance}m")
         print("=" * 60)
 
-        # Create environments for this stage
+        # Create environments for this stage (tolerance scales with speed)
         env = SubprocVecEnv([
-            make_env(i, 42 + stage * 100, num_gates, radius, max_steps, gate_tolerance, speed_factor)
+            make_env(i, 42 + stage * 100, num_gates, radius, max_steps, stage_tolerance, speed_factor)
             for i in range(n_envs)
         ])
         env = VecMonitor(env)
@@ -256,10 +258,9 @@ def main():
         model = train_curriculum(
             n_envs=args.envs,
             max_steps=args.max_steps,
-            gate_tolerance=args.tolerance,
         )
-        print("\nAuto-testing final model...")
-        test_model("models/curriculum/final", gate_tolerance=args.tolerance)
+        print("\nAuto-testing final model at final stage tolerance (0.9m)...")
+        test_model("models/curriculum/final", gate_tolerance=0.9)
 
 
 if __name__ == "__main__":
