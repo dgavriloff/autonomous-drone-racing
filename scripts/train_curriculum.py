@@ -43,29 +43,29 @@ from scripts.train_parallel import VelocityRacingEnv, create_simple_track
 
 
 # Curriculum stages: (radius, num_gates, speed_factor, tolerance, timesteps)
-# NOW USING RACE DRONE: MAX_SPEED_KMH = 200
-# speed_factor 0.03 = 1.67 m/s (slow baseline for RACE drone)
-# Phase 1: Geometry curriculum at baseline speed
+# CF2X drone: MAX_SPEED_KMH = 30 (8.33 m/s max)
+# speed_factor * 30 * (1000/3600) = speed in m/s
+# 0.1 = 0.83 m/s, 0.3 = 2.5 m/s, 0.5 = 4.17 m/s, 0.8 = 6.67 m/s, 1.0 = 8.33 m/s
+
+# Phase 1: Geometry curriculum at slow speed
 GEOMETRY_CURRICULUM = [
-    (1.5, 3, 0.03, 0.6, 300000),   # Stage 1: small course, 3 gates, ~1.7 m/s
-    (1.5, 5, 0.03, 0.6, 400000),   # Stage 2: small course, 5 gates
-    (2.0, 5, 0.03, 0.6, 400000),   # Stage 3: medium course
-    (2.5, 5, 0.03, 0.6, 500000),   # Stage 4: larger course - geometry complete
+    (1.5, 3, 0.1, 0.6, 300000),    # Stage 1: small course, 3 gates, ~0.83 m/s
+    (1.5, 5, 0.1, 0.6, 400000),    # Stage 2: small course, 5 gates
+    (2.0, 5, 0.1, 0.6, 400000),    # Stage 3: medium course
+    (2.5, 5, 0.1, 0.6, 500000),    # Stage 4: larger course - geometry complete
 ]
 
-# Phase 2: Speed curriculum with SCALED RADIUS
-# NOW USING RACE DRONE: MAX_SPEED_KMH = 200, so speed_factor maps differently
-# speed_factor * 200 * (1000/3600) = speed in m/s
-# 0.05 = 2.78 m/s, 0.10 = 5.56 m/s, 0.20 = 11.1 m/s, 0.36 = 20 m/s, 0.54 = 30 m/s
+# Phase 2: Speed curriculum with SCALED RADIUS (a = v²/r)
+# Larger radii needed for higher speeds to keep centripetal acceleration manageable
 SPEED_CURRICULUM = [
-    (2.0, 5, 0.05, 0.6, 400000),    # Stage 5: 2.8 m/s, warmup
-    (3.0, 5, 0.10, 0.7, 400000),    # Stage 6: 5.6 m/s
-    (4.0, 5, 0.15, 0.8, 500000),    # Stage 7: 8.3 m/s
-    (5.0, 5, 0.20, 0.9, 500000),    # Stage 8: 11.1 m/s
-    (7.0, 5, 0.27, 1.0, 500000),    # Stage 9: 15 m/s
-    (10.0, 5, 0.36, 1.2, 600000),   # Stage 10: 20 m/s (competition speed!)
-    (15.0, 5, 0.45, 1.4, 700000),   # Stage 11: 25 m/s
-    (20.0, 5, 0.54, 1.6, 800000),   # Stage 12: 30 m/s (near Swift level!)
+    (2.0, 5, 0.2, 0.6, 400000),    # Stage 5: 1.67 m/s
+    (2.5, 5, 0.3, 0.7, 400000),    # Stage 6: 2.5 m/s
+    (3.0, 5, 0.4, 0.8, 500000),    # Stage 7: 3.33 m/s
+    (4.0, 5, 0.5, 0.8, 500000),    # Stage 8: 4.17 m/s
+    (5.0, 5, 0.6, 0.9, 500000),    # Stage 9: 5.0 m/s
+    (6.0, 5, 0.7, 1.0, 500000),    # Stage 10: 5.83 m/s
+    (7.0, 5, 0.8, 1.0, 600000),    # Stage 11: 6.67 m/s
+    (8.0, 5, 1.0, 1.2, 600000),    # Stage 12: 8.33 m/s (CF2X max!)
 ]
 
 # Combined curriculum
