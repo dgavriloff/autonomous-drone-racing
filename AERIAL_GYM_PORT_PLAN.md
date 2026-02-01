@@ -1,15 +1,16 @@
 # Aerial Gym Port Plan
 
-## ⚠️ BLOCKED: RTX 5080 Blackwell Compatibility Issue
+## ✅ UNBLOCKED: PyTorch Nightly Workaround Works!
 
-**Status**: Port BLOCKED - RTX 5080 (Blackwell sm_120) not supported by Isaac Sim 4.5.0/PyTorch
+**Status**: Port WORKING - RTX 5080 supported via PyTorch nightly with cu128
 
-The training PC's RTX 5080 GPU is too new. PyTorch bundled with Isaac Sim 4.5.0 only supports up to Ada Lovelace (sm_90). Blackwell (sm_120) support requires Isaac Sim 5.2+ (expected Q1-Q2 2026).
+**Fix Applied (2026-02-01):**
+```bash
+pip install --upgrade --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+export LD_LIBRARY_PATH=/usr/lib/wsl/lib:$LD_LIBRARY_PATH
+```
 
-**Options**:
-1. Wait for Isaac Sim 5.2+ with Blackwell support
-2. Swap training PC GPU to RTX 4090 or older
-3. Continue optimizing gym-pybullet-drones (current approach)
+**Result**: Isaac Drone Racer trains successfully at 30-40 it/s (with 4 envs)
 
 ---
 

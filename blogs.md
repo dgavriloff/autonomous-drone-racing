@@ -1812,3 +1812,52 @@ The "perfect" RTX 5080 training PC (mentioned in Entry 23 as ideal for Isaac Sim
 - Options: Wait for software update, swap GPU, or optimize current approach
 
 ---
+
+## Entry 25: RTX 5080 FIXED - PyTorch Nightly Workaround!
+**Date: 2026-02-01**
+
+### The Fix
+
+Research revealed PyTorch 2.7.0+ nightly builds support Blackwell (sm_120). Applied the workaround:
+
+```bash
+# In Isaac racing venv
+pip install --upgrade --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# Set CUDA library path for WSL
+export LD_LIBRARY_PATH=/usr/lib/wsl/lib:$LD_LIBRARY_PATH
+```
+
+### Result: TRAINING WORKS!
+
+Isaac Drone Racer runs successfully on RTX 5080:
+- 30-40 iterations/second with 4 parallel environments
+- Environment creation: ✓
+- Neural network initialization: ✓
+- PPO training loop: ✓
+
+### Key Packages Installed
+
+| Package | Version |
+|---------|---------|
+| torch | 2.11.0.dev20260201+cu128 |
+| torchvision | 0.25.0.dev20260201+cu128 |
+| Isaac Sim | 4.5.0 |
+| Isaac Lab | 2.1.0 |
+
+### Compatibility Warning
+
+isaaclab packages pin torch==2.5.1, but the nightly works anyway:
+```
+isaaclab 0.36.21 requires torch==2.5.1, but you have torch 2.11.0.dev20260201+cu128 which is incompatible.
+```
+
+These warnings can be ignored - training proceeds successfully.
+
+### Next Steps
+
+1. Run full training with 4096 parallel environments
+2. Test trained policies
+3. Benchmark speeds achieved
+
+---
