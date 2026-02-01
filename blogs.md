@@ -647,5 +647,27 @@ With policy robustness confirmed, proceed to vision pipeline integration:
 
 ### Files Added
 - `scripts/test_noise_robustness.py` - Noise/delay robustness testing
+- `scripts/test_vision_pipeline.py` - Vision-based environment (VisionRacingEnv)
+- `scripts/debug_vision.py` - Vision pipeline debugging
+
+### Vision Pipeline Integration Attempt
+
+**What we built:**
+- `VisionRacingEnv`: Environment using camera → GateNet → QuAdGate → PoseEstimator
+- Gate rendering in PyBullet (orange box visuals)
+- Camera capture from drone perspective
+
+**What we discovered:**
+- Camera capture works ✓
+- Gate rendering works ✓ (visible orange boxes in camera)
+- GateNet NOT detecting gates ✗
+
+**Root cause:** GateNet was trained on different data. The orange box rendering in PyBullet doesn't match the training distribution.
+
+**Evidence:**
+- Camera image shows clear orange gate
+- GateNet mask output: mean=0.10, max=0.24 (should be ~1.0 for gate pixels)
+
+**Solution needed:** Retrain GateNet on data collected from this PyBullet environment with these gate visuals.
 
 ---
