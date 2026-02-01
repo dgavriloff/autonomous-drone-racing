@@ -73,7 +73,6 @@ class VelocityRacingEnv(BaseRLAviary):
         reward_velocity: float = 0.2,
         reward_smoothness: float = -0.01,
         reward_crash: float = -50.0,
-        speed_factor: float = 0.03,  # Fraction of MAX_SPEED_KMH (default=0.03 = library default)
     ):
         self.track = track
         self.gate_tolerance = gate_tolerance
@@ -83,7 +82,6 @@ class VelocityRacingEnv(BaseRLAviary):
         self.reward_velocity = reward_velocity
         self.reward_smoothness = reward_smoothness
         self.reward_crash = reward_crash
-        self.speed_factor = speed_factor
         self.current_gate = 0
         self.gates_passed = 0
         self.step_count = 0
@@ -102,10 +100,6 @@ class VelocityRacingEnv(BaseRLAviary):
             obs=ObservationType.KIN,
             act=ActionType.VEL,
         )
-
-        # Override SPEED_LIMIT based on speed_factor
-        # Default 0.03 = 0.25 m/s, 0.25 = 2.1 m/s, 0.5 = 4.2 m/s
-        self.SPEED_LIMIT = self.speed_factor * self.MAX_SPEED_KMH * (1000/3600)
 
     def _observationSpace(self):
         # Full observation space with position (helps with track layout understanding)
@@ -206,11 +200,11 @@ class VelocityRacingEnv(BaseRLAviary):
         return obs, reward, terminated, truncated, info
 
 
-def make_env(rank, seed, num_gates, radius, max_steps=1000, gate_tolerance=0.8, speed_factor=0.03):
+def make_env(rank, seed, num_gates, radius, max_steps=1000, gate_tolerance=0.8):
     """Create a single environment instance."""
     def _init():
         track = create_simple_track(num_gates, radius)
-        env = VelocityRacingEnv(track, gui=False, max_steps=max_steps, gate_tolerance=gate_tolerance, speed_factor=speed_factor)
+        env = VelocityRacingEnv(track, gui=False, max_steps=max_steps, gate_tolerance=gate_tolerance)
         env.reset(seed=seed + rank)
         return env
     set_random_seed(seed)
