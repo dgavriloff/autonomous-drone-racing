@@ -82,14 +82,14 @@ class SpeedRacingEnv(BaseRLAviary):
         gui: bool = False,
         gate_tolerance: float = 0.5,
         max_steps: int = 1000,
-        # Speed-focused rewards
+        # Speed-focused rewards (balanced to preserve gate completion)
         target_speed: float = 5.0,  # Target average speed
-        reward_gate: float = 100.0,  # Big bonus for gates
-        reward_speed: float = 0.5,  # Reward for going fast
+        reward_gate: float = 500.0,  # Very big bonus for gates (was 100)
+        reward_speed: float = 0.1,  # Modest reward for speed (was 0.5)
         reward_progress: float = 2.0,  # Reward for approaching gate
-        reward_alignment: float = 0.3,  # Reward for pointing toward gate
-        reward_lap_time: float = 200.0,  # Bonus for fast lap completion
-        reward_crash: float = -100.0,
+        reward_alignment: float = 0.5,  # Reward for velocity toward gate (was 0.3)
+        reward_lap_time: float = 500.0,  # Big bonus for fast lap (was 200)
+        reward_crash: float = -200.0,  # Stronger crash penalty (was -100)
     ):
         self.track = track
         self.gate_tolerance = gate_tolerance
@@ -316,6 +316,7 @@ def train(
     gate_tolerance=0.5,
     target_speed=5.0,
     resume_from=None,
+    learning_rate=3e-4,
 ):
     """Train speed-optimized policy."""
     print("=" * 60)
@@ -327,8 +328,10 @@ def train(
     print(f"Gate tolerance: {gate_tolerance}m")
     print(f"Max steps: {max_steps}")
     print(f"Timesteps: {timesteps}")
+    print(f"Learning rate: {learning_rate}")
     if resume_from:
         print(f"Resuming from: {resume_from}")
+        print("TIP: Use --lr 3e-5 for fine-tuning to avoid catastrophic forgetting")
     print()
 
     # Create parallel environments
@@ -345,12 +348,18 @@ def train(
     # Create or load model
     if resume_from:
         print(f"Loading pretrained model from {resume_from}...")
-        model = SAC.load(resume_from, env=env, verbose=1, tensorboard_log="./logs/speed")
+        model = SAC.load(
+            resume_from,
+            env=env,
+            verbose=1,
+            tensorboard_log="./logs/speed",
+            learning_rate=learning_rate,  # Override LR for fine-tuning
+        )
     else:
         model = SAC(
             "MlpPolicy",
             env,
-            learning_rate=3e-4,
+            learning_rate=learning_rate,
             buffer_size=1000000,
             learning_starts=10000,
             batch_size=512,
@@ -405,6 +414,8 @@ def main():
     parser.add_argument("--tolerance", type=float, default=0.5)
     parser.add_argument("--target-speed", type=float, default=5.0)
     parser.add_argument("--resume", type=str, default=None)
+    parser.add_argument("--lr", type=float, default=3e-4,
+                        help="Learning rate (use 3e-5 for fine-tuning)")
     args = parser.parse_args()
 
     train(
@@ -416,6 +427,7 @@ def main():
         gate_tolerance=args.tolerance,
         target_speed=args.target_speed,
         resume_from=args.resume,
+        learning_rate=args.lr,
     )
 
 
