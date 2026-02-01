@@ -1996,3 +1996,39 @@ Discovered that `play.py` evaluation requires Vulkan ray tracing, which WSL2 doe
 3. Add curriculum learning for gate count to reach 5/5+ gates
 
 ---
+
+## Entry 28: Improvement Plan - Systematic Iteration
+**Date: 2026-02-01**
+
+### The Approach
+
+With TensorBoard metrics extraction working, we can iterate without visual evaluation. Created `IMPROVEMENT_PLAN.md` with 5 prioritized experiments:
+
+| Priority | Experiment | Rationale |
+|----------|------------|-----------|
+| 1 | **100K iterations** | Cheapest test - just more compute |
+| 2 | **8:1 thrust** | Higher power worked before (4:1→6:1 gave +33%) |
+| 3 | **Curriculum learning** | Agent never sees gate 5+ (crashes first) |
+| 4 | **Reward tuning** | Adjust incentives for later gates |
+| 5 | **Domain randomization** | Robustness for sim-to-real |
+
+### Key Metrics to Track
+
+```python
+'Info / Episode_Reward/gate_passed'   # Primary - gates completed
+'Reward / Total reward (mean)'         # Overall performance
+'Episode / Total timesteps (mean)'     # Survival time
+'Info / Episode_Reward/terminating'    # Crash rate (lower = better)
+```
+
+### Decision Criteria
+
+- gate_passed > 4.5 → Keep change, continue
+- gate_passed ≈ 4.0-4.5 → Combine with next experiment
+- gate_passed < 4.0 → Revert
+
+### Starting Experiment 1
+
+Running 100K iterations (2x baseline) to see if performance still improving at 50K.
+
+---
