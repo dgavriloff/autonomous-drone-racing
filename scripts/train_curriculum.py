@@ -142,7 +142,8 @@ def train_curriculum(n_envs=16, max_steps=1000):
                 batch_size=512,
                 tau=0.005,
                 gamma=0.99,
-                ent_coef="auto",  # Auto works for slow speeds, will add target_entropy for fast stages
+                ent_coef="auto",
+                target_entropy=-2,  # Higher than default -4 to maintain more exploration
                 verbose=1,
                 tensorboard_log="./logs/curriculum",
             )
