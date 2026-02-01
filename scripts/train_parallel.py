@@ -26,6 +26,105 @@ from gym_pybullet_drones.envs.BaseRLAviary import BaseRLAviary
 from gym_pybullet_drones.utils.enums import DroneModel, Physics, ActionType, ObservationType
 
 from src.envs.high_freq_racing import TrackConfig, GateConfig
+import gymnasium as gym
+
+
+class DomainRandomizationWrapper(gym.Wrapper):
+    """Wrapper for domain randomization to improve sim-to-real transfer.
+
+    Randomizes dynamics parameters at each reset:
+    - Mass: affects hover thrust, acceleration
+    - Thrust coefficient (KF): motor efficiency
+    - Observation noise: position, velocity, orientation
+    - Observation delay: simulates vision/sensor latency
+    """
+
+    def __init__(
+        self,
+        env,
+        mass_range=(0.85, 1.15),  # ±15% of nominal
+        kf_range=(0.88, 1.12),    # ±12% of nominal
+        pos_noise=0.05,           # 5cm RMS position noise
+        vel_noise=0.1,            # 0.1 m/s velocity noise
+        ori_noise=0.05,           # ~3° orientation noise
+        delay_frames=0,           # Observation delay in frames
+        seed=None,
+    ):
+        super().__init__(env)
+        self.mass_range = mass_range
+        self.kf_range = kf_range
+        self.pos_noise = pos_noise
+        self.vel_noise = vel_noise
+        self.ori_noise = ori_noise
+        self.delay_frames = delay_frames
+        self.rng = np.random.default_rng(seed)
+
+        # Store nominal values
+        self.nominal_mass = env.MASS
+        self.nominal_kf = env.KF
+
+        # Observation buffer for delay
+        self.obs_buffer = []
+
+    def reset(self, **kwargs):
+        # Randomize dynamics before reset
+        self._randomize_dynamics()
+        obs, info = self.env.reset(**kwargs)
+
+        # Clear observation buffer
+        self.obs_buffer = [obs] * (self.delay_frames + 1)
+
+        # Add noise to observation
+        obs = self._add_observation_noise(obs)
+
+        return obs, info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # Update observation buffer
+        self.obs_buffer.append(obs)
+        if len(self.obs_buffer) > self.delay_frames + 1:
+            self.obs_buffer.pop(0)
+
+        # Return delayed and noisy observation
+        delayed_obs = self.obs_buffer[0]
+        noisy_obs = self._add_observation_noise(delayed_obs)
+
+        return noisy_obs, reward, terminated, truncated, info
+
+    def _randomize_dynamics(self):
+        """Randomize drone physical parameters."""
+        # Randomize mass
+        mass_scale = self.rng.uniform(*self.mass_range)
+        self.env.MASS = self.nominal_mass * mass_scale
+        self.env.GRAVITY = self.env.MASS * self.env.G
+
+        # Randomize thrust coefficient
+        kf_scale = self.rng.uniform(*self.kf_range)
+        self.env.KF = self.nominal_kf * kf_scale
+
+        # Update hover RPM based on new parameters
+        # hover_rpm = sqrt(mass * g / (4 * kf))
+        self.env.HOVER_RPM = np.sqrt(self.env.GRAVITY / (4 * self.env.KF))
+
+    def _add_observation_noise(self, obs):
+        """Add Gaussian noise to observation."""
+        noisy_obs = obs.copy()
+
+        # Position noise (indices 0:3)
+        if self.pos_noise > 0:
+            noisy_obs[0:3] += self.rng.normal(0, self.pos_noise, 3)
+
+        # Velocity noise (indices 3:6)
+        if self.vel_noise > 0:
+            noisy_obs[3:6] += self.rng.normal(0, self.vel_noise, 3)
+
+        # Orientation noise (indices 6:9 for euler angles)
+        if self.ori_noise > 0:
+            noisy_obs[6:9] += self.rng.normal(0, self.ori_noise, 3)
+
+        return noisy_obs
 
 
 def create_simple_track(num_gates=5, radius=2.0, height=0.5):
@@ -54,6 +153,93 @@ def create_simple_track(num_gates=5, radius=2.0, height=0.5):
         name=f"circle_{num_gates}g_{radius}m",
         gates=gates,
         start_position=np.array([start_x, 0.0, height]),
+    )
+
+
+def create_competition_track(track_type="swift", scale=1.0, height_variation=0.0, seed=None):
+    """Create competition-style tracks based on real racing layouts.
+
+    Args:
+        track_type: "swift" (7 gates, 75m lap), "figure8" (lemniscate), "random"
+        scale: Scale factor for track dimensions (1.0 = full size)
+        height_variation: Random height variation in meters (0 = flat)
+        seed: Random seed for reproducibility
+    """
+    rng = np.random.default_rng(seed)
+    gates = []
+
+    if track_type == "swift":
+        # Swift-style: 30x30m arena, 7 gates, 75m lap
+        # Based on Nature 2023 paper track layout
+        positions = [
+            [12.0, 0.0],    # Gate 1: Start straight
+            [8.0, 8.0],     # Gate 2: First turn
+            [-2.0, 12.0],   # Gate 3: Far corner
+            [-10.0, 5.0],   # Gate 4: Back straight
+            [-8.0, -6.0],   # Gate 5: Second turn
+            [0.0, -10.0],   # Gate 6: Far end
+            [8.0, -4.0],    # Gate 7: Return to start
+        ]
+        base_height = 0.6
+
+    elif track_type == "figure8":
+        # Lemniscate (figure-8) pattern - common in TII dataset
+        # Parametric: x = a*cos(t)/(1+sin²(t)), y = a*sin(t)*cos(t)/(1+sin²(t))
+        a = 12.0  # Scale factor
+        num_gates = 7
+        positions = []
+        for i in range(num_gates):
+            t = 2 * np.pi * i / num_gates
+            denom = 1 + np.sin(t)**2
+            x = a * np.cos(t) / denom
+            y = a * np.sin(t) * np.cos(t) / denom
+            positions.append([x, y])
+        base_height = 0.6
+
+    elif track_type == "random":
+        # Random track within 30x30m bounds
+        num_gates = rng.integers(5, 10)
+        positions = []
+        for _ in range(num_gates):
+            x = rng.uniform(-12, 12)
+            y = rng.uniform(-12, 12)
+            positions.append([x, y])
+        # Sort by angle from center for reasonable ordering
+        positions.sort(key=lambda p: np.arctan2(p[1], p[0]))
+        base_height = 0.6
+
+    else:
+        raise ValueError(f"Unknown track type: {track_type}")
+
+    # Apply scale
+    positions = [[p[0] * scale, p[1] * scale] for p in positions]
+
+    # Create gates
+    for i, (x, y) in enumerate(positions):
+        # Height with optional variation
+        z = base_height + rng.uniform(-height_variation, height_variation) if height_variation > 0 else base_height
+
+        # Orientation: face toward next gate
+        next_i = (i + 1) % len(positions)
+        next_x, next_y = positions[next_i]
+        direction = np.array([next_x - x, next_y - y, 0])
+        direction = direction / (np.linalg.norm(direction) + 1e-6)
+        yaw = np.arctan2(direction[1], direction[0])
+        quat = p.getQuaternionFromEuler([0, 0, yaw])
+
+        gates.append(GateConfig(
+            position=np.array([x, y, z]),
+            orientation=np.array(quat),
+        ))
+
+    # Start position: slightly before first gate
+    start_x = positions[0][0] * 0.8
+    start_y = positions[0][1] * 0.8
+
+    return TrackConfig(
+        name=f"{track_type}_{len(gates)}g_s{scale:.1f}",
+        gates=gates,
+        start_position=np.array([start_x, start_y, base_height]),
     )
 
 
@@ -91,7 +277,7 @@ class VelocityRacingEnv(BaseRLAviary):
         self.prev_action = None
 
         super().__init__(
-            drone_model=DroneModel.CF2X,  # Crazyflie - has working PID controller
+            drone_model=DroneModel.CF2X,  # Crazyflie - reliable PID controller
             num_drones=1,
             initial_xyzs=np.array([track.start_position]),
             initial_rpys=np.zeros((1, 3)),
@@ -104,9 +290,8 @@ class VelocityRacingEnv(BaseRLAviary):
         )
 
         # Override SPEED_LIMIT based on speed_factor
-        # CF2X MAX_SPEED_KMH = 30 (8.3 m/s), but we can request higher velocities
-        # The physics will limit actual achievable speed to ~5-8 m/s
-        # speed_factor 0.03 = 0.25 m/s (original slow), 1.0 = 8.3 m/s
+        # CF2X MAX_SPEED_KMH = 30 (8.33 m/s max physical capability)
+        # speed_factor 1.0 = 8.33 m/s
         self.SPEED_LIMIT = self.speed_factor * self.MAX_SPEED_KMH * (1000/3600)
 
     def _observationSpace(self):

@@ -47,11 +47,12 @@ class RacePIDControl(BaseControl):
         # Attitude control gains (scale with inertia ratio)
         # Original CF2X: P=[70000, 70000, 60000], I=[0, 0, 500], D=[20000, 20000, 12000]
         # CF2X inertia: ~1.4e-5, RACE inertia: ~3.1e-3, ratio ~220
-        # Need stronger P-gain to prevent roll divergence
-        inertia_ratio = 150  # Higher ratio for better stability
+        # REDUCED: Previous 150x caused roll-pitch coupling instability
+        # Using 20x with heavy D-damping to prevent oscillations
+        inertia_ratio = 20  # Much more conservative
         self.P_COEFF_TOR = np.array([70000., 70000., 60000.]) * inertia_ratio
-        self.I_COEFF_TOR = np.array([.0, .0, 500.]) * inertia_ratio * 0.5
-        self.D_COEFF_TOR = np.array([20000., 20000., 12000.]) * inertia_ratio * 1.5
+        self.I_COEFF_TOR = np.array([.0, .0, 500.]) * inertia_ratio * 0.2  # Minimal integral
+        self.D_COEFF_TOR = np.array([20000., 20000., 12000.]) * inertia_ratio * 4.0  # Heavy damping
 
         # PWM to RPM conversion for RACE drone
         # For hover: thrust = mass * g = 0.830 * 9.8 = 8.134 N

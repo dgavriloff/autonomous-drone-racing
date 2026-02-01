@@ -68,6 +68,19 @@ SPEED_CURRICULUM = [
     (8.0, 5, 1.0, 1.2, 600000),    # Stage 12: 8.33 m/s (CF2X max!)
 ]
 
+# Phase 3: Competition tracks (optional - use after speed curriculum)
+# Based on Swift/DCL: 7 gates, 30x30m arena, variable heights
+# Note: These use create_competition_track() instead of create_simple_track()
+COMPETITION_CURRICULUM = [
+    # (track_type, scale, speed_factor, tolerance, timesteps, height_var, use_dr)
+    ("swift", 0.3, 0.5, 0.8, 500000, 0.0, False),     # Stage 13: Scaled Swift, no DR
+    ("swift", 0.4, 0.6, 0.9, 500000, 0.0, False),     # Stage 14: Larger Swift
+    ("swift", 0.5, 0.7, 1.0, 600000, 0.1, False),     # Stage 15: Add height variation
+    ("figure8", 0.4, 0.6, 0.9, 500000, 0.0, False),   # Stage 16: Figure-8 pattern
+    ("swift", 0.5, 0.8, 1.0, 600000, 0.2, True),      # Stage 17: Add domain randomization
+    ("random", 0.5, 0.8, 1.0, 600000, 0.2, True),     # Stage 18: Random tracks + DR
+]
+
 # Combined curriculum
 CURRICULUM = GEOMETRY_CURRICULUM + SPEED_CURRICULUM
 
