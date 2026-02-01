@@ -80,7 +80,7 @@ class SpeedRacingEnv(BaseRLAviary):
         ctrl_freq: int = 48,
         pyb_freq: int = 240,
         gui: bool = False,
-        gate_tolerance: float = 0.5,
+        gate_tolerance: float = 0.8,  # Same as original working env
         max_steps: int = 1000,
         # Speed-focused rewards (balanced to preserve gate completion)
         target_speed: float = 5.0,  # Target average speed
@@ -333,7 +333,7 @@ def train(
     radius=1.5,
     n_envs=16,
     max_steps=500,
-    gate_tolerance=0.5,
+    gate_tolerance=0.8,
     target_speed=5.0,
     resume_from=None,
     learning_rate=3e-4,
@@ -433,7 +433,7 @@ def main():
     parser.add_argument("--radius", type=float, default=1.5)
     parser.add_argument("--envs", type=int, default=16)
     parser.add_argument("--max-steps", type=int, default=500)
-    parser.add_argument("--tolerance", type=float, default=0.5)
+    parser.add_argument("--tolerance", type=float, default=0.8)
     parser.add_argument("--target-speed", type=float, default=5.0)
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--lr", type=float, default=3e-4,
