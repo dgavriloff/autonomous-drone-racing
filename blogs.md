@@ -636,4 +636,16 @@ My hypothesis was wrong. The policy handles 40ms delay (2 frames) perfectly. The
 2. **Tight tolerance training**: 0.5m training tolerance gave margin for noise
 3. **Smoothing effect**: PID + delay = natural low-pass filter on noisy commands
 
+### Next Steps
+
+With policy robustness confirmed, proceed to vision pipeline integration:
+
+1. **Create VisionRacingEnv** - Environment that uses camera + vision pipeline instead of ground truth
+2. **Connect GateNet → QuAdGate → PoseEstimator → EKF** - Full perception pipeline
+3. **Test end-to-end** - Camera images → state estimate → policy → velocity commands
+4. **Domain randomization** (if needed) - Only if real pipeline exceeds 10cm error
+
+### Files Added
+- `scripts/test_noise_robustness.py` - Noise/delay robustness testing
+
 ---
