@@ -102,8 +102,8 @@ class VelocityRacingEnv(BaseRLAviary):
         )
 
         # Override the conservative SPEED_LIMIT (default is 0.03 * max = 0.25 m/s)
-        # Set to 50% of max speed for faster flight while maintaining control
-        self.SPEED_LIMIT = 0.5 * self.MAX_SPEED_KMH * (1000/3600)  # ~4.2 m/s
+        # Set to 25% of max speed - 8x faster but still learnable
+        self.SPEED_LIMIT = 0.25 * self.MAX_SPEED_KMH * (1000/3600)  # ~2.1 m/s
 
     def _observationSpace(self):
         # Full observation space with position (helps with track layout understanding)

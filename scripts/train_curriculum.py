@@ -142,7 +142,7 @@ def train_curriculum(n_envs=16, max_steps=1000, gate_tolerance=0.5):
                 batch_size=512,
                 tau=0.005,
                 gamma=0.99,
-                ent_coef="auto",
+                ent_coef=0.2,  # Fixed to prevent entropy collapse at high speeds
                 verbose=1,
                 tensorboard_log="./logs/curriculum",
             )
