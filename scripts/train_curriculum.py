@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Curriculum Learning: Geometry first, then Speed.
+Curriculum Learning: Geometry first, then Speed with Scaled Radius.
 
 Phase 1 - Geometry (0.25 m/s, tight tolerance):
 1. Small radius (1.0m), 3 gates
@@ -8,14 +8,17 @@ Phase 1 - Geometry (0.25 m/s, tight tolerance):
 3. Medium radius (1.25m), 5 gates
 4. Full radius (1.5m), 5 gates
 
-Phase 2 - Speed (full course, gradual speed increase):
-5. 0.5 m/s (2x baseline)
-6. 1.0 m/s (2x previous)
-7. 1.5 m/s (1.5x previous)
-8. 2.0 m/s (1.33x previous)
+Phase 2 - Speed with SCALED RADIUS:
+5. 0.5 m/s, r=1.5m  (a=0.17 m/s²)
+6. 1.0 m/s, r=1.75m (a=0.57 m/s²)
+7. 1.5 m/s, r=2.0m  (a=1.13 m/s²)
+8. 2.0 m/s, r=2.5m  (a=1.60 m/s²)
 
-Key insight: Speed jumps > 2x cause exploration failure.
-Tolerance scales slightly with speed to account for observation delay.
+Key insights:
+- Speed jumps > 2x cause exploration failure
+- Centripetal acceleration a = v²/r grows quadratically with speed
+- Scaling radius keeps turning difficulty gradual
+- Tolerance scales with speed for observation delay
 """
 
 import argparse
@@ -45,13 +48,15 @@ GEOMETRY_CURRICULUM = [
     (1.5, 5, 0.03, 0.5, 500000),   # Stage 4: full course - geometry complete
 ]
 
-# Phase 2: Speed curriculum on full course (1.5m, 5 gates)
+# Phase 2: Speed curriculum with SCALED RADIUS
+# Key insight: Centripetal acceleration = v²/r, so radius must grow with v²
+# At constant a_max, r = v²/a_max. We scale radius to keep turning manageable.
 # Max 2x speed jumps, tolerance scales with speed
 SPEED_CURRICULUM = [
-    (1.5, 5, 0.06, 0.55, 400000),  # Stage 5: 0.5 m/s (2x baseline)
-    (1.5, 5, 0.12, 0.60, 400000),  # Stage 6: 1.0 m/s (2x previous)
-    (1.5, 5, 0.18, 0.65, 400000),  # Stage 7: 1.5 m/s (1.5x previous)
-    (1.5, 5, 0.24, 0.70, 500000),  # Stage 8: 2.0 m/s (1.33x previous)
+    (1.5, 5, 0.06, 0.55, 400000),  # Stage 5: 0.5 m/s, a=0.17 m/s²
+    (1.75, 5, 0.12, 0.60, 400000), # Stage 6: 1.0 m/s, a=0.57 m/s² (was 0.67)
+    (2.0, 5, 0.18, 0.65, 500000),  # Stage 7: 1.5 m/s, a=1.13 m/s² (was 1.50)
+    (2.5, 5, 0.24, 0.75, 600000),  # Stage 8: 2.0 m/s, a=1.60 m/s² (was 2.67)
 ]
 
 # Combined curriculum
