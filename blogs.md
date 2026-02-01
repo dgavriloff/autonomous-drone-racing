@@ -1214,3 +1214,69 @@ Average max speed: 2.35 m/s
 4. **Integrate vision pipeline** - the real competition requirement
 
 ---
+
+## Entry 17: Scaled Radius = 100% Success Rate
+**Date: 2026-01-31**
+
+### The Breakthrough
+
+By scaling track radius with speed during training, achieved **perfect 10/10 full laps** on the original tight course.
+
+| Metric | Fixed Radius | Scaled Radius |
+|--------|--------------|---------------|
+| Full laps | 8/10 (80%) | **10/10 (100%)** |
+| Avg gates | 4.70/5 | **5.00/5** |
+| Max speed | 2.57 m/s | **3.53 m/s** |
+| Avg speed | 2.35 m/s | **2.45 m/s** |
+
+### The Insight
+
+Training on the target track at high speed is unnecessarily hard. The centripetal acceleration a = v²/r means:
+- 2.0 m/s on 1.5m radius → 2.67 m/s² (very hard)
+- 2.0 m/s on 2.5m radius → 1.60 m/s² (manageable)
+
+**Train easy, test hard.** The skills transfer.
+
+### New Speed Curriculum
+
+| Stage | Speed | Radius | Centripetal Accel |
+|-------|-------|--------|-------------------|
+| 5 | 0.5 m/s | 1.5m | 0.17 m/s² |
+| 6 | 1.0 m/s | 1.75m | 0.57 m/s² |
+| 7 | 1.5 m/s | 2.0m | 1.13 m/s² |
+| 8 | 2.0 m/s | 2.5m | 1.60 m/s² |
+
+Each stage increases speed while keeping turning difficulty gradual.
+
+### Why It Works
+
+1. **Decoupled challenges** - Learn speed control without extreme turning
+2. **Transferable skills** - High-speed reflexes work on any track
+3. **Progressive difficulty** - Never face a 16x jump in turning force
+4. **Confidence building** - Agent succeeds at each stage before advancing
+
+### Test Results (on original 1.5m track!)
+
+```
+Episode 1: 5/5 gates, max_speed=2.13m/s
+Episode 2: 5/5 gates, max_speed=2.40m/s
+Episode 3: 5/5 gates, max_speed=2.17m/s
+Episode 4: 5/5 gates, max_speed=2.13m/s
+Episode 5: 5/5 gates, max_speed=2.37m/s
+Episode 6: 5/5 gates, max_speed=3.53m/s  <- wow
+Episode 7: 5/5 gates, max_speed=2.85m/s
+Episode 8: 5/5 gates, max_speed=2.14m/s
+Episode 9: 5/5 gates, max_speed=2.40m/s
+Episode 10: 5/5 gates, max_speed=2.42m/s
+
+Full laps: 10/10 (100%)
+Average max speed: 2.45 m/s
+```
+
+### Key Lesson
+
+**Don't train on the hardest version of your problem.** Train on progressively harder versions that build the right skills, then let those skills generalize to the target difficulty.
+
+This is curriculum learning done right - not just making tolerance looser, but making the *environment* easier in ways that still teach the core skill.
+
+---
