@@ -1861,3 +1861,75 @@ These warnings can be ignored - training proceeds successfully.
 3. Benchmark speeds achieved
 
 ---
+
+## Entry 26: Isaac Drone Racer - First Full Training Run
+**Date: 2026-02-01**
+
+### Training Complete!
+
+Ran full 50,000 iteration training on Isaac Drone Racer with RTX 5080:
+
+| Metric | Value |
+|--------|-------|
+| Iterations | 50,000 |
+| Parallel Envs | 4,096 |
+| Runtime | ~46 minutes |
+| Samples/sec | ~80,000 |
+| Checkpoints | 11 (5K-50K + best) |
+
+**Training config:**
+- 7-gate track (complex geometry)
+- 256×256×256 MLP network
+- PPO algorithm
+- Rewards: gate_passed=400, progress=20, terminating=-500
+
+### Evaluation Results
+
+CLI evaluation worked (headless mode with `--log` flag):
+
+| Episode | Duration | Max Speed | Final State |
+|---------|----------|-----------|-------------|
+| 1 | ~6s | ~5 m/s | Unknown |
+| 2 | ~30s | ~10 m/s | Unknown |
+| 3 | **10.2s** | **14 m/s** | Crashed (z=0.04m) |
+
+**Key observations:**
+- Drone reaches **14 m/s (50 km/h)** - competition-relevant!
+- Flying 10+ seconds before termination
+- Motors running at max (5145 rad/s)
+- Crashes after high-speed flight (still learning)
+
+### Competition Drone Research
+
+Researched AI Grand Prix drone specs:
+
+| Spec | Isaac Drone Racer | Competition (A2RL Proxy) | Gap |
+|------|-------------------|-------------------------|-----|
+| Mass | 607g | ~500g | +20% |
+| Thrust:Weight | 4:1 | 6:1 | 50% less power |
+| Max Speed | ~25 m/s | ~42 m/s | 40% slower |
+| Sensors | Full state | Camera + IMU | ✓ |
+
+**Finding:** Neros Technologies (competition drone provider) specs not yet released. Using A2RL x DCL as proxy - those drones hit 150 km/h with 6:1 thrust-to-weight.
+
+### Documentation Created
+
+`COMPETITION_DRONE_SPECS.md` - Full comparison with:
+- How to modify `thrust_coef` and `omega_max` to match competition
+- Three options: increase thrust, reduce mass, or both
+- Parameter change math
+
+### Lessons Learned
+
+1. **Isaac Sim headless works** - training uses CUDA, evaluation needs Vulkan (WSL issue)
+2. **CLI eval with --log** - outputs CSV trajectory data without renderer
+3. **50 km/h achieved** - significant improvement over gym-pybullet-drones 8.33 m/s cap
+4. **More training needed** - drone flies fast but crashes, needs tuning
+
+### Next Steps
+
+1. Tune training to improve gate completion (currently crashes)
+2. Match drone params to competition specs (6:1 thrust-to-weight)
+3. Add speed curriculum once basic track works
+
+---
