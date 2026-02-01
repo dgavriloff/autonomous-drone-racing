@@ -1,12 +1,9 @@
 #!/bin/bash
-# Speed training with fine-tuning settings
+# Speed training from scratch
 cd ~/repos/autonomous-drone-racing
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate drone-racing
+source venv/bin/activate
 python scripts/train_speed.py \
-    --timesteps 1000000 \
-    --envs 24 \
+    --timesteps 500000 \
+    --envs 16 \
     --target-speed 5.0 \
-    --resume models/curriculum_final.zip \
-    --lr 3e-5 \
-    > speed.log 2>&1
+    2>&1 | tee speed.log
