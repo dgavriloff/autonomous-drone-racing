@@ -10,14 +10,30 @@ Vision-based autonomous drone racing system for the AI Grand Prix competition by
 
 **Key Requirement:** Camera-only perception (no ground truth state)
 
+## IMPORTANT: Use Training PC for Training!
+
+**Always use the remote training PC for training runs.** See `USING_TRAINING_PC.md` for details.
+- RTX 5080, 64GB RAM, 24 cores
+- ~1200 FPS with 16 parallel envs
+- Push code via git, pull on remote, run with tmux
+
+```bash
+# Push code first
+git push
+
+# Pull and train on remote
+ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos/autonomous-drone-racing && git pull && source venv/bin/activate && python scripts/YOUR_SCRIPT.py"'
+```
+
 ## Current Status
 
 | Metric | Value |
 |--------|-------|
-| Best gates | 4/5 |
+| Best gates | **5/5** |
 | Approach | Velocity control (ActionType.VEL) |
-| Best model | `models/parallel_vel/large_tolerance.zip` |
+| Best model | `models/curriculum_final.zip` |
 | Training | Parallel envs (16x SubprocVecEnv) |
+| Speed | 0.25 m/s (needs improvement - competition is 25+ m/s) |
 
 ## Architecture
 
@@ -109,20 +125,25 @@ Reward curves looked fine, but watching actual position over time revealed the a
 
 ## Current Challenges
 
-### Stuck at 4/5 Gates
-- Gate 5 is near start position (completing the loop)
-- Agent never experienced gate 5 much during training
-- Likely needs curriculum learning on number of gates
+### Speed is Too Slow
+- Current: 0.25 m/s average
+- Competition: 25+ m/s (100x faster!)
+- Need speed-optimized training with lap time rewards
 
-### Vision Pipeline Not Integrated
-- Current approach uses ground truth state
-- Competition requires camera-only perception
-- Need to integrate GateNet + EKF with velocity control
+### Vision Pipeline Blocked
+- DCL SDK not yet released (coming April 2026)
+- GateNet trained on wrong data (PyBullet ≠ DCL visuals)
+- Architecture is ready, just needs DCL training data
+
+### Policy Robustness (SOLVED)
+- Policy handles 10cm noise + 40ms delay
+- Ready for vision integration when DCL data available
 
 ## TODO
 1. ~~Train GateNet on collected data~~
-2. ~~Get velocity control working~~ (4/5 gates)
-3. Get 5/5 gates (curriculum on gate count?)
-4. Integrate vision pipeline with velocity control
-5. Implement domain randomization for sim-to-real
-6. Optimize for competition SDK
+2. ~~Get velocity control working~~ (5/5 gates ✓)
+3. ~~Get 5/5 gates~~ (curriculum learning ✓)
+4. **Speed optimization** (current priority - 0.25 m/s → 10+ m/s)
+5. Harder tracks (more gates, altitude variation)
+6. Domain randomization for sim-to-real
+7. Vision integration (blocked until DCL SDK)
