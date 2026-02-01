@@ -1933,3 +1933,66 @@ Researched AI Grand Prix drone specs:
 3. Add speed curriculum once basic track works
 
 ---
+
+## Entry 27: 6:1 Thrust-to-Weight - Competition Config Results
+**Date: 2026-02-01**
+
+### Config Change
+
+Updated Isaac Drone Racer to match competition drone specs:
+
+```python
+# Old (4:1 thrust-to-weight)
+thrust_coef: float = 2.25e-7
+omega_max: float = 5145.0
+init: list[float] = (2572.5, 2572.5, 2572.5, 2572.5)
+
+# New (6:1 thrust-to-weight)
+thrust_coef: float = 2.40e-7
+omega_max: float = 5540.0
+init: list[float] = (2261.0, 2261.0, 2261.0, 2261.0)
+```
+
+The `init` (hover point) was recalculated: `omega_hover = sqrt(weight / (4 × thrust_coef)) = 2261`
+
+### Training Results
+
+50K iterations, same hyperparameters, ~59 minutes runtime.
+
+**Comparison: 4:1 vs 6:1 Thrust-to-Weight**
+
+| Metric | 4:1 Config | 6:1 Config | Improvement |
+|--------|------------|------------|-------------|
+| **Gates Passed (final)** | 3.07 | **4.08** | **+33%** |
+| **Gates Passed (best)** | 3.66 | **4.21** | **+15%** |
+| **Total Reward (final)** | 86.57 | **115.17** | **+33%** |
+| **Episode Length** | 1463 steps | 1620 steps | +11% |
+
+### Analysis
+
+The 6:1 config dramatically outperforms 4:1:
+- **33% more gates passed** on average
+- Drone survives 11% longer (more episode steps)
+- Higher thrust = more agility for navigating turns
+
+This validates the approach of training with competition-realistic specs from the start.
+
+### WSL2 Evaluation Limitation
+
+Discovered that `play.py` evaluation requires Vulkan ray tracing, which WSL2 doesn't support. Training works (CUDA-only physics), but visual evaluation needs native GPU access.
+
+**Workaround:** Extracted metrics directly from TensorBoard event logs using Python.
+
+### Lessons Learned
+
+1. **Train with target specs** - don't wait to configure competition drone params
+2. **Higher thrust helps** - more power = more ability to correct and navigate
+3. **TensorBoard is your friend** - can extract all metrics without renderer
+
+### Next Steps
+
+1. Run longer training (100K+ iterations) with 6:1 config
+2. Try even higher thrust-to-weight (7:1 or 8:1 like real racing drones)
+3. Add curriculum learning for gate count to reach 5/5+ gates
+
+---
