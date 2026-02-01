@@ -671,3 +671,68 @@ With policy robustness confirmed, proceed to vision pipeline integration:
 **Solution needed:** Retrain GateNet on data collected from this PyBullet environment with these gate visuals.
 
 ---
+
+## Entry 10: Pivot to Speed - Vision Blocked, Policy Can Improve
+**Date: 2026-01-31**
+
+### Research Findings
+
+Researched the AI Grand Prix competition (Anduril + DCL):
+
+| Finding | Implication |
+|---------|-------------|
+| DCL SDK **not yet released** | Can't train on real competition visuals |
+| Technical specs "coming later" | Vision pipeline blocked until April 2026 |
+| Hardware standardized (Neros drones) | Software is the differentiator |
+| Winners hit **100+ km/h** | Speed is critical |
+| MonoRace uses same architecture | Our GateNet→QuAdGate→EKF approach is correct |
+
+### The Pivot
+
+**Vision is blocked** - no point training GateNet on PyBullet when competition uses DCL platform.
+
+**But policy improvements are NOT blocked:**
+
+| What | Current | Competition Level | Gap |
+|------|---------|-------------------|-----|
+| Speed | ~2 m/s | 25+ m/s | **10x slower** |
+| Gates | 5/5 | 10+ gates | Need harder tracks |
+| Control | Velocity (48Hz) | Direct RPM (500Hz) | Abstraction overhead |
+| Sim-to-real | None | Domain randomization | Need robustness |
+
+### Priority Analysis
+
+```
+Speed ─────► Harder Tracks ─────► Domain Randomization ─────► Sim-to-Real
+  │
+  └── Fundamental gap. Everything else builds on fast flight.
+```
+
+**Decision:** Focus on speed optimization first. A slow policy on a hard track is still slow.
+
+### Speed Optimization Plan
+
+**Current reward function:**
+- `+50` per gate passed
+- `+2 * progress` (distance reduction)
+- `+0.2 * velocity_alignment` (moving toward gate)
+- `-0.01 * action_smoothness`
+
+**Problem:** No incentive to go FAST. Policy completes gates cautiously.
+
+**New approach:**
+1. Add **lap time reward** - bonus for completing faster
+2. Add **speed bonus** - reward for high velocity (capped)
+3. **Curriculum on speed** - start slow, increase speed requirement
+4. **Reduce gate tolerance slightly** - force precision at speed
+
+**Target:** 5/5 gates at 10+ m/s average speed (5x improvement)
+
+### Implementation
+
+1. Modify reward function in `VelocityRacingEnv`
+2. Train with speed incentives
+3. Test lap times vs current baseline
+4. Iterate on reward balance
+
+---
