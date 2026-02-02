@@ -62,27 +62,32 @@ cat OPTIMIZATION_LOOP.md  # (this file)
 
 ## CURRENT EXPERIMENT
 
-**Status:** READY TO START
+**Status:** DISCOVERY - curriculum already enabled!
 
-**Next experiment:** #1 - Longer Training (100K iterations)
+**Finding:** `randomise_start=True` is already set, which:
+- Randomly picks starting gate (0-6)
+- Spawns drone near previous gate
+- Agent already sees all gates during training
 
-**Rationale:** The broken 100K run actually saved checkpoints (agent_240000.pt exists). Need to evaluate if longer training helps.
+**Why we're still stuck at 4.15 gates:**
+1. Random curriculum may not focus enough on hard gates
+2. Later gates have different geometry (heights, yaw angles)
+3. Gate reward (400) may not be strong enough vs crash penalty (-500)
 
-**Action:**
+**Next experiment:** #3 - Increase gate reward to 800
+
+**Rationale:** Make passing each gate more valuable. Current ratio is 400:500 (gate:crash). Try 800:500 to make gates 1.6x more valuable than avoiding crashes.
+
+**How to do it:**
 ```bash
-# Check if 100K run has good results
-./scripts/remote/training-status.sh
+# Edit the config file on remote
+ssh training-pc 'wsl bash -c "sed -i \"s/gate_passed, weight=400/gate_passed, weight=800/\" ~/repos/isaac_drone_racer/tasks/drone_racer/drone_racer_env_cfg.py"'
 
-# If checkpoints exist, extract metrics:
-ssh training-pc 'wsl bash -c "cd ~/repos/isaac_drone_racer && python -c \"
-import tensorboard as tb
-from tensorboard.backend.event_processing import event_accumulator
-ea = event_accumulator.EventAccumulator('logs/skrl/drone_racer/2026-02-01_15-15-38_ppo_torch')
-ea.Reload()
-scalars = ea.Scalars('Info / Episode_Reward/gate_passed')
-print('Steps:', [s.step for s in scalars[-5:]])
-print('Gates:', [s.value for s in scalars[-5:]])
-\""'
+# Verify change
+ssh training-pc 'wsl grep gate_passed ~/repos/isaac_drone_racer/tasks/drone_racer/drone_racer_env_cfg.py'
+
+# Start training
+./scripts/remote/start-training.sh 50000 4096
 ```
 
 ---
@@ -112,9 +117,18 @@ print('Gates:', [s.value for s in scalars[-5:]])
 ### Experiment #1: 100K iterations
 - **Date:** 2026-02-01
 - **Run:** 2026-02-01_15-15-38_ppo_torch
-- **Config:** Same as baseline, 100K iters
-- **Result:** PENDING EVALUATION
-- **Notes:** Run had issues but saved checkpoints (agent_240000.pt, best_agent.pt)
+- **Config:** Same as baseline, 100K iters (ran to 240K steps)
+- **Result:** gate_passed=4.15 (final), 4.15 (max) - PLATEAU
+- **Comparison:** Baseline max was 4.21, this never exceeded 4.15
+- **Decision:** ⚠️ COMBINE - more training alone doesn't help, need curriculum or reward changes
+
+### Experiment #2: Higher gate reward (800 vs 400)
+- **Date:** 2026-02-02
+- **Run:** STARTED 19:26 PST
+- **Config:** gate_passed reward=800 (was 400), 50K iters, 4096 envs
+- **Hypothesis:** Higher gate reward (1.6x crash penalty) will incentivize gate completion
+- **Result:** PENDING - training ~45-60 minutes
+- **Discovery:** `randomise_start=True` already provides curriculum - drone spawns at random gates
 
 ---
 
