@@ -9,17 +9,20 @@ cd /home/ooousay/repos/autonomous-drone-racing
 # Activate venv
 source /home/ooousay/repos/pybullet-venv/bin/activate
 
+# Log file
+LOGFILE=/home/ooousay/swift_training.log
+
+{
 echo "=============================================="
 echo "SWIFT PPO TRAINING"
 echo "=============================================="
-echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
 echo "Envs: 16 parallel"
 echo "Timesteps: 100M"
 echo "Started: $(date)"
 echo "=============================================="
 
 # Run training with Swift hyperparameters
-# 100M timesteps, 16 parallel envs, checkpoint every 500k
 python scripts/train_swift_ppo.py \
     --timesteps 100000000 \
     --envs 16 \
@@ -30,3 +33,4 @@ python scripts/train_swift_ppo.py \
 echo "=============================================="
 echo "Training completed: $(date)"
 echo "=============================================="
+} 2>&1 | tee "$LOGFILE"
