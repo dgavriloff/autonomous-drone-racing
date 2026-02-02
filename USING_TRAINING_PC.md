@@ -5,51 +5,29 @@ Remote training machine (Windows + WSL2 + RTX 5080) accessed via SSH through Tai
 ## Quick Reference
 
 ```bash
-# Check what's running
-./scripts/remote/training-status.sh
+# SSH to training PC
+ssh ooousay@denis.tail07d7b1.ts.net
 
-# Start training (50K iterations, 4096 envs)
-./scripts/remote/start-training.sh 50000 4096
+# Run WSL command
+ssh ooousay@denis.tail07d7b1.ts.net "wsl <command>"
 
-# Monitor training output
-./scripts/remote/monitor-training.sh
-
-# Kill all training processes
-./scripts/remote/kill-training.sh
-
-# Run any WSL command
-./scripts/remote/wsl-run.sh "ps aux | grep python"
-
-# Interactive WSL shell
-./scripts/remote/wsl-run.sh
+# Check running processes
+ssh ooousay@denis.tail07d7b1.ts.net "wsl ps aux" | grep python
 ```
 
 ---
 
 ## Setup (One-Time)
 
-### 1. SSH Config
-
-Add to `~/.ssh/config`:
-
-```
-Host training-pc
-    HostName denis.tail07d7b1.ts.net
-    User ooousay
-    ConnectTimeout 15
-    ServerAliveInterval 60
-    ServerAliveCountMax 3
-```
-
-### 2. Verify Connection
+### 1. Verify Connection
 
 ```bash
-ssh training-pc 'echo "Connected!"'
+ssh ooousay@denis.tail07d7b1.ts.net "echo Connected!"
 ```
 
-### 3. Tailscale
+### 2. Tailscale
 
-Both machines must be on the same Tailscale network. Check with:
+Both machines must be on the same Tailscale network:
 ```bash
 tailscale status
 ```
@@ -59,115 +37,49 @@ tailscale status
 ## Architecture
 
 ```
-Local Mac ──SSH──> Windows (training-pc) ──WSL──> Ubuntu (isaac_drone_racer)
+Local Mac ──SSH──> Windows (training-pc) ──WSL──> Ubuntu
 ```
 
 **Key paths on training PC (WSL):**
 | What | Path |
 |------|------|
-| Isaac Drone Racer | `/home/ooousay/repos/isaac_drone_racer/` |
-| Python venv | `/home/ooousay/repos/isaac-racing-venv/` |
-| Training logs | `/home/ooousay/repos/isaac_drone_racer/logs/skrl/drone_racer/` |
-| Checkpoints | `<run_dir>/checkpoints/` |
+| Project repo | `/home/ooousay/repos/autonomous-drone-racing/` |
+| Models | `models/` |
+| Data | `data/` |
 
 ---
 
-## Running Commands
+## Running Training
 
-### The Quoting Problem
-
-Commands pass through 4 shells: **local → SSH → Windows CMD → WSL → bash**
-
-**Golden rule:** Use single quotes for SSH, double quotes for bash:
-
+### 1. Push code from local
 ```bash
-# CORRECT
-ssh training-pc 'wsl bash -c "echo hello && pwd"'
-
-# WRONG (quoting breaks)
-ssh training-pc "wsl bash -c 'echo hello'"
+git push
 ```
 
-### Simple Commands
-
+### 2. Pull on training PC and run
 ```bash
-# List files
-ssh training-pc 'wsl ls -la /home/ooousay/repos/'
-
-# Check processes
-ssh training-pc 'wsl bash -c "ps aux | grep python"'
-
-# Kill a process
-ssh training-pc 'wsl bash -c "kill -9 12345"'
+ssh ooousay@denis.tail07d7b1.ts.net "wsl bash -c 'cd ~/repos/autonomous-drone-racing && git pull && pip install -e . && python scripts/train_vision_student.py --demos data/teacher_demos --epochs 100'"
 ```
 
-### Complex Commands (Use Helper Scripts)
-
-For anything with pipes, quotes, or variables, use the helper scripts or write a script on the remote machine.
-
----
-
-## Training Workflows
-
-### Start Training
-
+### Using tmux (for long-running jobs)
 ```bash
-# Default: 50K iterations, 4096 envs
-./scripts/remote/start-training.sh
+# Start tmux session
+ssh ooousay@denis.tail07d7b1.ts.net "wsl tmux new-session -d -s training 'cd ~/repos/autonomous-drone-racing && python scripts/train_vision_student.py --demos data/teacher_demos --epochs 100'"
 
-# Custom: 100K iterations, 2048 envs
-./scripts/remote/start-training.sh 100000 2048
+# Check progress
+ssh ooousay@denis.tail07d7b1.ts.net "wsl tmux capture-pane -t training -p" | tail -20
+
+# Kill session
+ssh ooousay@denis.tail07d7b1.ts.net "wsl tmux kill-session -t training"
 ```
-
-This uses tmux so training survives SSH disconnects.
-
-### Monitor Training
-
-```bash
-# Last 50 lines of output
-./scripts/remote/monitor-training.sh
-
-# Last 100 lines
-./scripts/remote/monitor-training.sh 100
-```
-
-### Check Status
-
-```bash
-./scripts/remote/training-status.sh
-```
-
-Shows: running processes, latest runs, checkpoints, GPU usage.
-
-### Stop Training
-
-```bash
-./scripts/remote/kill-training.sh
-```
-
-### Attach to Training Session (Interactive)
-
-```bash
-ssh -t training-pc 'wsl bash -c "tmux attach -t training"'
-```
-
-Press `Ctrl+B, D` to detach without stopping.
 
 ---
 
 ## File Transfer
 
-### Copy Checkpoint to Local
-
+### Copy model to local
 ```bash
-# Using scp through WSL
-scp training-pc:'$(wsl wslpath -w /home/ooousay/repos/isaac_drone_racer/logs/skrl/drone_racer/2026-02-01_13-18-41_ppo_torch/checkpoints/best_agent.pt)' ./models/
-```
-
-### Alternative: Git Push from Remote
-
-```bash
-ssh training-pc 'wsl bash -c "cd /home/ooousay/repos/isaac_drone_racer && git add logs/ && git commit -m \"Add checkpoints\" && git push"'
+scp ooousay@denis.tail07d7b1.ts.net:/home/ooousay/repos/autonomous-drone-racing/models/vision_student/best_model.pt ./models/vision_student/
 ```
 
 ---
@@ -175,45 +87,18 @@ ssh training-pc 'wsl bash -c "cd /home/ooousay/repos/isaac_drone_racer && git ad
 ## Troubleshooting
 
 ### SSH Times Out
-
-1. Check Tailscale is running: `tailscale status`
-2. Verify hostname resolves: `ping denis.tail07d7b1.ts.net`
-3. Training PC might be asleep - wake it up
+1. Check Tailscale: `tailscale status`
+2. Ping hostname: `ping denis.tail07d7b1.ts.net`
+3. Training PC might be asleep
 
 ### WSL Command Fails with "not recognized"
-
-The command is being interpreted by Windows CMD, not WSL. Wrap in `wsl bash -c "..."`:
-
+Command is running on Windows CMD, not WSL. Wrap in `wsl bash -c "..."`:
 ```bash
-# Wrong (grep runs on Windows)
-ssh training-pc 'wsl ps aux | grep python'
+# Wrong
+ssh training-pc "wsl ps aux | grep python"
 
-# Correct (grep runs in WSL)
-ssh training-pc 'wsl bash -c "ps aux | grep python"'
-```
-
-### Training Not Saving Checkpoints
-
-Check if training is actually running vs stuck:
-1. `./scripts/remote/training-status.sh` - look at checkpoint timestamps
-2. If no new checkpoints after 30+ min, training may be broken
-3. Check logs: `./scripts/remote/monitor-training.sh 100`
-
-### GPU Memory Issues
-
-```bash
-# Check GPU memory
-ssh training-pc 'nvidia-smi'
-
-# Kill orphaned processes
-./scripts/remote/kill-training.sh
-```
-
-### Process Won't Die
-
-Use `-9` flag:
-```bash
-ssh training-pc 'wsl bash -c "kill -9 <PID>"'
+# Correct (pipe on local)
+ssh training-pc "wsl ps aux" | grep python
 ```
 
 ---
@@ -229,17 +114,6 @@ ssh training-pc 'wsl bash -c "kill -9 <PID>"'
 
 ### Known Limitations
 
-- **No visual rendering** - WSL2 lacks Vulkan support
-- **Isaac Sim 4.5** - RTX 5080 (Blackwell) not officially supported
-- **Training only** - evaluation must be headless (`--headless` flag)
-
----
-
-## Claude Code Integration
-
-When using Claude Code to interact with the training PC:
-
-1. **Always use DNS name**: `denis.tail07d7b1.ts.net` (not IP addresses)
-2. **Use helper scripts** when possible (avoids quoting hell)
-3. **Check before starting**: Run `./scripts/remote/check-processes.sh` first
-4. **Don't spawn unattended agents** that start long-running processes without explicit user approval
+- **No Vulkan** - WSL2 only supports CUDA, not Vulkan
+- **Camera rendering works** - gym-pybullet-drones uses OpenGL (CPU) which works fine
+- **Isaac Sim abandoned** - Don't use, Vulkan required for cameras

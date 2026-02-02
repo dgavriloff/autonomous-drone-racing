@@ -2781,3 +2781,101 @@ All pieces in place for behavioral cloning:
 3. Student architecture (CNN + MLP)
 
 ---
+
+## Entry 39: Speed Limit Consolidation - Why 8 m/s is Fine
+**Date: 2026-02-02**
+
+### The Question
+
+"Can we go faster than 8 m/s in gym-pybullet-drones?"
+
+### The Answer: Yes, But We Don't Need To (Yet)
+
+**Speed limit status:**
+
+| Issue | Status | Details |
+|-------|--------|---------|
+| SPEED_LIMIT constant | ✅ Fixed | Entry 13 - override in train_parallel.py |
+| CF2X drone cap | Known | 8.33 m/s max (physics-based) |
+| RACE drone | Shelved | 55 m/s possible but altitude issues |
+
+### What We Already Did
+
+**Entry 13:** Found library hardcodes 0.25 m/s (3% of max). Fixed with one line:
+```python
+self.SPEED_LIMIT = self.speed_factor * self.MAX_SPEED_KMH * (1000/3600)
+```
+
+**Entry 20-21:** Tried RACE drone (830g, 55 m/s capable):
+- Created custom RacePIDControl
+- Achieved 15.8 m/s (57 km/h) in testing
+- ❌ Altitude drifts at high speed (thrust projection issue)
+- ❌ BaseRLAviary doesn't officially support RACE
+- Shelved - code preserved at `src/control/race_pid_control.py`
+
+### Why 8 m/s is Fine For Now
+
+1. **Vision is the bottleneck, not speed**
+   - GateNet runs at 24 Hz (camera rate)
+   - At 8 m/s, drone moves 33cm between frames
+   - At 30 m/s, drone moves 1.25m between frames (too fast for current pipeline)
+
+2. **Competition SDK will change everything**
+   - DCL SDK releases April 2026
+   - Will have different drone specs, different physics
+   - Any speed work now gets thrown out
+
+3. **Navigation skills transfer, speeds don't**
+   - Policy learns: "turn toward gate, pass through center"
+   - This transfers to any speed with retraining
+   - No point optimizing for CF2X when competition uses different drone
+
+4. **We need vision working first**
+   - Fast blind drone = fast crash
+   - Slow seeing drone = actually useful
+   - Priority: camera → perception → control → speed
+
+### The Path to 30+ m/s (When Needed)
+
+```
+Option 1: RACE drone revival
+├── Fix altitude compensation in RacePIDControl
+├── Create RACEVelocityAviary wrapper
+└── Retrain policy with curriculum
+
+Option 2: Custom URDF
+├── Design drone with 8:1 thrust-to-weight
+├── Higher MAX_RPM, better coefficients
+└── Use existing PID framework
+
+Option 3: Wait for DCL SDK
+├── Real competition drone specs
+├── Proper sim-to-real pipeline
+└── This is the actual path forward
+```
+
+### Decision: Focus on Vision
+
+**Rationale:**
+- Speed optimization is premature
+- Vision pipeline is the critical path
+- Competition SDK will dictate final specs
+- 8 m/s is fast enough to validate the full pipeline
+
+### Current Priority Stack
+
+```
+1. Vision Student Training    ← NOW
+   └── Behavioral cloning from 44K demos
+
+2. Vision-Based Flight Test
+   └── End-to-end camera → action
+
+3. Robustness & Domain Randomization
+   └── Noise, lighting, texture variation
+
+4. Speed Optimization          ← LATER (post-SDK)
+   └── RACE drone or custom URDF
+```
+
+---

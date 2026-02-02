@@ -10,147 +10,119 @@ Vision-based autonomous drone racing system for the AI Grand Prix competition by
 
 **Key Requirement:** Camera-only perception (no ground truth state)
 
-## IMPORTANT: Use Training PC for Training!
+## Current Status (Updated 2026-02-02)
 
-**Always use the remote training PC for training runs.** See `USING_TRAINING_PC.md` for details.
-- RTX 5080, 64GB RAM, 24 cores
-- ~1200 FPS with 16 parallel envs
-- Push code via git, pull on remote, run with tmux
+| Component | Status | Details |
+|-----------|--------|---------|
+| Teacher Policy | ✅ Done | `models/curriculum_final.zip` - 5/5 gates |
+| GateNet | ✅ Done | `models/gate_net/best_model.pt` - 76% IoU |
+| Vision Demos | ✅ Done | 44K frames in `data/teacher_demos/` |
+| Vision Student | 🔄 Next | Behavioral cloning ready to train |
+
+## Simulator: gym-pybullet-drones ONLY
+
+**DO NOT use Isaac Sim, Flightmare, or AirSim.** We evaluated all options:
+
+| Simulator | Status | Why Not |
+|-----------|--------|---------|
+| **gym-pybullet-drones** | ✅ USE THIS | Works for everything |
+| Isaac Sim | ❌ Abandoned | Vulkan broken in WSL2, can't render cameras |
+| Flightmare | ❌ Dead | Python 3.6, TensorFlow 1.14, unmaintained since 2020 |
+| AirSim | ❌ Deprecated | Microsoft killed it Dec 2023 |
+
+## Training PC
+
+**Use for long training runs.** RTX 5080, 64GB RAM, 24 cores.
 
 ```bash
-# Push code first
-git push
+# SSH to training PC
+ssh ooousay@denis.tail07d7b1.ts.net
 
-# Pull and train on remote
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos/autonomous-drone-racing && git pull && source venv/bin/activate && python scripts/YOUR_SCRIPT.py"'
+# Run command in WSL
+wsl <command>
+
+# Example: pull and train
+wsl bash -c "cd ~/repos/autonomous-drone-racing && git pull"
 ```
 
-## Current Status
-
-| Metric | Value |
-|--------|-------|
-| Best gates | **5/5** |
-| Approach | Velocity control (ActionType.VEL) |
-| Best model | `models/curriculum_final.zip` |
-| Training | Parallel envs (16x SubprocVecEnv) |
-| Speed | Training with 4.17 m/s limit (was capped at 0.25 m/s by library bug) |
+Note: No venv on training PC for pybullet. Install deps as needed or create one.
 
 ## Architecture
 
-### Current Working Approach (Velocity Control)
+### Current: Teacher-Student Pipeline
 ```
-Observation -> SAC Policy -> Velocity Commands -> PID (internal) -> Motors
-```
-- Uses `ActionType.VEL` which provides velocity abstraction
-- Built-in PID handles motor coordination
-- Action `[vx, vy, vz, yaw_rate]` maps directly to intended movement
-
-### Target Competition Architecture (Vision-Based)
-```
-Camera (24Hz) -> GateNet -> QuAdGate -> EKF (500Hz) -> G&CNet -> Motors
+1. Teacher (ground truth) → curriculum_final.zip [DONE]
+2. Collect demos (image, action) → 44K frames [DONE]
+3. Train vision student (behavioral cloning) → [IN PROGRESS]
+4. Test vision-only flight → [NEXT]
 ```
 
-### Components
-- **GateNet**: U-Net segmentation for gate detection (src/vision/gate_net.py)
-- **QuAdGate**: Corner detection from masks (src/vision/quad_gate.py)
-- **PoseEstimator**: PnP-based gate pose (src/vision/pose_estimator.py)
-- **EKF**: Extended Kalman Filter for state estimation (src/state/ekf.py)
-- **G&CNet**: Neural network controller (src/control/gcnet.py) - NOT WORKING with direct RPM
-- **MotorMixer**: Thrust/torque to RPM (src/control/motor_mixer.py)
-
-## Project Files
-
-### Key Documentation
-- **`CLAUDE.md`** (this file): Project overview and instructions
-- **`USING_TRAINING_PC.md`**: How to use the remote training PC via SSH/Tailscale. Use this for long training runs - the PC has an RTX 5080, 64GB RAM, and 24 cores. Always sync code via git before training.
-- **`blogs.md`**: Development blog documenting discoveries, bugs, and solutions. **Add entries here when making significant progress or discoveries.** Follow the existing format with date, problem, solution, and lessons learned.
-
-### Training Scripts
-- **`scripts/train_parallel.py`**: Main training script with parallel envs (16x SubprocVecEnv)
-- **`scripts/test_parallel_model.py`**: Test trained models with configurable tolerance/steps
-
-## Environment Setup
-
-**Conda environment**: `drone-racing` (miniconda3)
-
-```bash
-# Activate environment
-source /Users/denisgavriloff/miniconda3/etc/profile.d/conda.sh
-conda activate drone-racing
+### Vision Pipeline
 ```
+Camera (64x48 RGB)
+    ↓
+GateNet (U-Net, 482K params) → Binary mask
+    ↓
+QuAdGate → 4 corner points
+    ↓
+PoseEstimator (PnP) → Gate pose
+    ↓
+Policy → Velocity commands [vx, vy, vz, yaw_rate]
+```
+
+## Key Files
+
+### Models
+- `models/curriculum_final.zip` - Teacher policy (5/5 gates)
+- `models/gate_net/best_model.pt` - GateNet segmentation (76% IoU)
+
+### Scripts
+- `scripts/train_parallel.py` - Train state-based policy
+- `scripts/collect_teacher_demos.py` - Collect vision demos from teacher
+- `scripts/train_vision_student.py` - Behavioral cloning training
+- `scripts/test_vision_pipeline.py` - Test full vision pipeline
+
+### Data
+- `data/teacher_demos/` - 44K (image, action) pairs for BC training
 
 ## Quick Start
 
 ```bash
-# Train with parallel environments (local)
-python scripts/train_parallel.py --timesteps 1000000 --envs 16
+# Activate environment (Mac)
+conda activate drone-racing
 
-# Test the model
-python scripts/test_parallel_model.py --model models/parallel_vel/large_tolerance.zip --episodes 5
+# Train vision student
+python scripts/train_vision_student.py --demos data/teacher_demos --epochs 100
 
-# Test with GUI visualization
-python scripts/test_parallel_model.py --model models/parallel_vel/large_tolerance.zip --episodes 3
+# Test vision pipeline
+python scripts/test_vision_pipeline.py --model models/curriculum_final.zip
 ```
 
-## Key Parameters
+## Speed Limits
 
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| Control freq | 48 Hz | With velocity abstraction |
-| Physics freq | 240 Hz | PyBullet simulation |
-| Gate tolerance | 0.8m (train) / 1.0m (test) | Larger helps with altitude drift |
-| Max steps | 500 (train) / 1000 (test) | More time to reach later gates |
-| Parallel envs | 16 | ~1200 FPS on training PC |
-| Max RPM | 21702.64 | CF2X actual (NOT 65535) |
+| Config | Speed | Notes |
+|--------|-------|-------|
+| Default | 0.25 m/s | Library hardcoded (SPEED_LIMIT bug) |
+| Fixed | 4.17 m/s | Override in train_parallel.py |
+| CF2X Max | 8.33 m/s | Drone physics limit |
 
-## Important Lessons Learned
+Speed is NOT the bottleneck. Vision is. 8 m/s is plenty for validation.
 
-### 1. Action Space Matters More Than Reward
-Direct motor control (ActionType.RPM) is extremely hard to learn. The agent kept flying straight up regardless of reward shaping. **Velocity control (ActionType.VEL) was the breakthrough** - it provides intuitive `[vx, vy, vz, yaw_rate]` commands while the built-in PID handles motor coordination.
+## Archived (Do Not Use)
 
-### 2. Frequency Matching
-Expert data collection MUST use the same control frequency as inference. Collecting at 240Hz and running at 500Hz causes crashes because physics timestep affects required motor thrust.
-
-### 3. MAX_RPM Constant
-gym-pybullet-drones CF2X has MAX_RPM ~21702, NOT 65535. Using wrong value causes 48% thrust loss.
-
-### 4. Research Recommendations Don't Always Transfer
-Literature suggested: fixed entropy coefficient, relative observations, VecNormalize. **All made things worse for our task.** Always test empirically.
-
-### 5. Altitude Drift is Real
-The drone navigates horizontally but drifts vertically (~0.7m). Solution: larger gate tolerance (0.8m training, 1.0m testing).
-
-### 6. Analyze Trajectories, Not Just Metrics
-Reward curves looked fine, but watching actual position over time revealed the altitude drift problem.
-
-### 7. SPEED_LIMIT Bug in gym-pybullet-drones
-The library hardcodes `SPEED_LIMIT = 0.03 * MAX_SPEED_KMH = 0.25 m/s` for velocity control. This caps the drone at 3% of max speed! **Fix:** Override after `super().__init__()`:
-```python
-self.SPEED_LIMIT = 0.5 * self.MAX_SPEED_KMH * (1000/3600)  # ~4.17 m/s
-```
-
-## Current Challenges
-
-### Speed Optimization (IN PROGRESS)
-- **Root cause found**: SPEED_LIMIT hardcoded to 0.25 m/s in library
-- **Fix applied**: Override to 4.17 m/s (50% of max)
-- **Training running**: Curriculum retraining with new speed limit
-
-### Vision Pipeline Blocked
-- DCL SDK not yet released (coming April 2026)
-- GateNet trained on wrong data (PyBullet ≠ DCL visuals)
-- Architecture is ready, just needs DCL training data
-
-### Policy Robustness (SOLVED)
-- Policy handles 10cm noise + 40ms delay
-- Ready for vision integration when DCL data available
+The following files are historical and relate to abandoned Isaac Sim work:
+- `archive/AERIAL_GYM_PORT_PLAN.md`
+- `archive/COMPETITION_DRONE_SPECS.md`
+- `archive/IMPROVEMENT_PLAN.md`
+- `archive/OPTIMIZATION_LOOP.md`
 
 ## TODO
-1. ~~Train GateNet on collected data~~
-2. ~~Get velocity control working~~ (5/5 gates ✓)
-3. ~~Get 5/5 gates~~ (curriculum learning ✓)
-4. ~~Find speed limit root cause~~ (SPEED_LIMIT bug ✓)
-5. **Speed training** (in progress - 4.17 m/s limit, curriculum retraining)
-6. Harder tracks (more gates, altitude variation)
-7. Domain randomization for sim-to-real
-8. Vision integration (blocked until DCL SDK)
+
+1. ✅ ~~Train teacher policy~~ (5/5 gates)
+2. ✅ ~~Train GateNet~~ (76% IoU)
+3. ✅ ~~Collect vision demos~~ (44K frames)
+4. 🔄 **Train vision student** ← CURRENT
+5. ⬜ Test vision-only flight
+6. ⬜ DAgger refinement (if needed)
+7. ⬜ Domain randomization
+8. ⬜ DCL SDK integration (April 2026)
