@@ -2109,6 +2109,82 @@ Need higher thrust-to-weight and/or speed rewards to reach competition speeds.
 
 ---
 
+## Entry 31: SSH System & Optimization Loop
+**Date: 2026-02-02**
+
+### Problem
+
+1. **Unreliable SSH** - was using hardcoded IP addresses that change
+2. **Orphan processes** - training and eval processes left running without tracking
+3. **No systematic iteration** - ad-hoc experiments without clear protocol
+4. **Evaluation gap** - can't see drone flying, only metrics
+
+### Solutions Implemented
+
+#### 1. SSH Config + Helper Scripts
+
+Added `training-pc` to `~/.ssh/config`:
+```
+Host training-pc
+    HostName denis.tail07d7b1.ts.net
+    User ooousay
+    ConnectTimeout 15
+    ServerAliveInterval 60
+```
+
+Created `scripts/remote/` with:
+- `training-status.sh` - full status (processes, runs, checkpoints, GPU)
+- `start-training.sh` - launch training in tmux
+- `monitor-training.sh` - view training output
+- `kill-training.sh` - stop all training processes
+- `wsl-run.sh` - run any WSL command
+
+#### 2. Optimization Loop Protocol
+
+Created `OPTIMIZATION_LOOP.md` with:
+- Systematic experiment queue
+- Decision criteria (gate_passed thresholds)
+- Metric extraction commands
+- Experiment log for tracking results
+- Recovery instructions after context compaction
+
+#### 3. Evaluation Options Researched
+
+| Option | Cost | Status |
+|--------|------|--------|
+| TensorBoard metrics | Free | ✅ Working |
+| Matplotlib trajectory replay | Free | To implement |
+| GCP L4 (Isaac Sim GUI) | $0.39/hr | $300 free credits |
+| gym-pybullet-drones GUI | Free | ✅ Working (different policy) |
+
+**Key insight:** Can iterate with metrics + trajectory plots. Visual eval is nice-to-have, not blocker.
+
+### Current State
+
+| Metric | Value |
+|--------|-------|
+| Best gates | 4.21/7 |
+| Best run | 2026-02-01_13-18-41_ppo_torch |
+| 100K run | Has checkpoints, needs evaluation |
+| Orphan processes | Killed |
+
+### Next Steps
+
+Follow OPTIMIZATION_LOOP.md:
+1. Evaluate 100K run metrics
+2. Compare to baseline (4.21 gates)
+3. Decide: keep/revert/combine
+4. Run next experiment from queue
+
+### Lessons Learned
+
+1. **Use DNS names** - `denis.tail07d7b1.ts.net` not IP addresses
+2. **Always use tmux** - training survives SSH disconnects
+3. **Check before starting** - `training-status.sh` prevents orphan processes
+4. **Document for compaction** - Claude needs breadcrumbs to continue work
+
+---
+
 ## Entry 30: Windows Native Isaac Sim Setup
 **Date: 2026-02-01**
 

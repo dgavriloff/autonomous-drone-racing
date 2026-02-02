@@ -1,113 +1,245 @@
 # Using the Training PC
 
-Remote training machine accessed via SSH through Tailscale.
+Remote training machine (Windows + WSL2 + RTX 5080) accessed via SSH through Tailscale.
 
-## Connection
-
-```bash
-# Connect to WSL on the training PC
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos && exec bash"'
-
-# Or run commands directly (recommended for scripts)
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "YOUR_COMMAND_HERE"'
-```
-
-## Important Notes
-
-### Quoting
-The SSH command goes through multiple layers: local shell → SSH → Windows → WSL → bash.
-- Use **single quotes** for the outer SSH command
-- Use **double quotes** for the inner bash -c command
+## Quick Reference
 
 ```bash
-# Correct
-ssh ... 'wsl -e bash -c "echo hello && pwd"'
+# Check what's running
+./scripts/remote/training-status.sh
 
-# Wrong (quoting issues)
-ssh ... "wsl -e bash -c 'echo hello && pwd'"
+# Start training (50K iterations, 4096 envs)
+./scripts/remote/start-training.sh 50000 4096
+
+# Monitor training output
+./scripts/remote/monitor-training.sh
+
+# Kill all training processes
+./scripts/remote/kill-training.sh
+
+# Run any WSL command
+./scripts/remote/wsl-run.sh "ps aux | grep python"
+
+# Interactive WSL shell
+./scripts/remote/wsl-run.sh
 ```
 
-### Environment Location
+---
+
+## Setup (One-Time)
+
+### 1. SSH Config
+
+Add to `~/.ssh/config`:
+
 ```
-~/repos/autonomous-drone-racing/
-├── venv/           # Python virtual environment
-├── scripts/        # Training scripts
-├── src/            # Source code
-└── models/         # Saved models
+Host training-pc
+    HostName denis.tail07d7b1.ts.net
+    User ooousay
+    ConnectTimeout 15
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
 ```
 
-### Activating the Environment
-Always activate venv before running Python:
+### 2. Verify Connection
+
 ```bash
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos/autonomous-drone-racing && source venv/bin/activate && python YOUR_SCRIPT.py"'
+ssh training-pc 'echo "Connected!"'
 ```
 
-### System Setup (already done)
-The following packages were installed:
-- `python3.12-venv` (via apt)
-- `build-essential python3-dev` (for compiling pybullet)
-- Python packages: torch, stable-baselines3, gymnasium, pybullet, gym-pybullet-drones
+### 3. Tailscale
 
-### GPU Available
-The machine has CUDA GPU support. PyTorch automatically detects and uses it ("Using cuda device").
-
-## Running Training
-
-### Short run (foreground)
+Both machines must be on the same Tailscale network. Check with:
 ```bash
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos/autonomous-drone-racing && source venv/bin/activate && python scripts/train_velocity_control.py --train --timesteps 200000"'
+tailscale status
 ```
 
-### Long run (use tmux or nohup)
-For long training runs, use tmux to prevent disconnection issues:
+---
+
+## Architecture
+
+```
+Local Mac ──SSH──> Windows (training-pc) ──WSL──> Ubuntu (isaac_drone_racer)
+```
+
+**Key paths on training PC (WSL):**
+| What | Path |
+|------|------|
+| Isaac Drone Racer | `/home/ooousay/repos/isaac_drone_racer/` |
+| Python venv | `/home/ooousay/repos/isaac-racing-venv/` |
+| Training logs | `/home/ooousay/repos/isaac_drone_racer/logs/skrl/drone_racer/` |
+| Checkpoints | `<run_dir>/checkpoints/` |
+
+---
+
+## Running Commands
+
+### The Quoting Problem
+
+Commands pass through 4 shells: **local → SSH → Windows CMD → WSL → bash**
+
+**Golden rule:** Use single quotes for SSH, double quotes for bash:
+
 ```bash
-# Start tmux session
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "tmux new-session -d -s training \"cd ~/repos/autonomous-drone-racing && source venv/bin/activate && python scripts/train_velocity_control.py --train --timesteps 1000000\""'
+# CORRECT
+ssh training-pc 'wsl bash -c "echo hello && pwd"'
 
-# Check on training
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "tmux capture-pane -t training -p | tail -50"'
-
-# Attach to session (interactive)
-ssh -t ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "tmux attach -t training"'
+# WRONG (quoting breaks)
+ssh training-pc "wsl bash -c 'echo hello'"
 ```
 
-## Syncing Code
+### Simple Commands
 
-### Push from local
 ```bash
-git add . && git commit -m "message" && git push
+# List files
+ssh training-pc 'wsl ls -la /home/ooousay/repos/'
+
+# Check processes
+ssh training-pc 'wsl bash -c "ps aux | grep python"'
+
+# Kill a process
+ssh training-pc 'wsl bash -c "kill -9 12345"'
 ```
 
-### Pull on remote
+### Complex Commands (Use Helper Scripts)
+
+For anything with pipes, quotes, or variables, use the helper scripts or write a script on the remote machine.
+
+---
+
+## Training Workflows
+
+### Start Training
+
 ```bash
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos/autonomous-drone-racing && git pull"'
+# Default: 50K iterations, 4096 envs
+./scripts/remote/start-training.sh
+
+# Custom: 100K iterations, 2048 envs
+./scripts/remote/start-training.sh 100000 2048
 ```
 
-## Retrieving Models
+This uses tmux so training survives SSH disconnects.
 
-### Copy model to local
+### Monitor Training
+
 ```bash
-scp ooousay@denis.tail07d7b1.ts.net:'wsl -e cat ~/repos/autonomous-drone-racing/models/velocity_control/final.zip' ./models/
+# Last 50 lines of output
+./scripts/remote/monitor-training.sh
+
+# Last 100 lines
+./scripts/remote/monitor-training.sh 100
 ```
 
-Or commit and push from remote:
+### Check Status
+
 ```bash
-ssh ooousay@denis.tail07d7b1.ts.net 'wsl -e bash -c "cd ~/repos/autonomous-drone-racing && git add models/ && git commit -m \"Add trained model\" && git push"'
+./scripts/remote/training-status.sh
 ```
+
+Shows: running processes, latest runs, checkpoints, GPU usage.
+
+### Stop Training
+
+```bash
+./scripts/remote/kill-training.sh
+```
+
+### Attach to Training Session (Interactive)
+
+```bash
+ssh -t training-pc 'wsl bash -c "tmux attach -t training"'
+```
+
+Press `Ctrl+B, D` to detach without stopping.
+
+---
+
+## File Transfer
+
+### Copy Checkpoint to Local
+
+```bash
+# Using scp through WSL
+scp training-pc:'$(wsl wslpath -w /home/ooousay/repos/isaac_drone_racer/logs/skrl/drone_racer/2026-02-01_13-18-41_ppo_torch/checkpoints/best_agent.pt)' ./models/
+```
+
+### Alternative: Git Push from Remote
+
+```bash
+ssh training-pc 'wsl bash -c "cd /home/ooousay/repos/isaac_drone_racer && git add logs/ && git commit -m \"Add checkpoints\" && git push"'
+```
+
+---
 
 ## Troubleshooting
 
-### apt lock errors
-Previous apt process may be running:
+### SSH Times Out
+
+1. Check Tailscale is running: `tailscale status`
+2. Verify hostname resolves: `ping denis.tail07d7b1.ts.net`
+3. Training PC might be asleep - wake it up
+
+### WSL Command Fails with "not recognized"
+
+The command is being interpreted by Windows CMD, not WSL. Wrap in `wsl bash -c "..."`:
+
 ```bash
-ssh ... 'wsl -e bash -c "sudo killall apt apt-get; sudo rm -f /var/lib/apt/lists/lock"'
+# Wrong (grep runs on Windows)
+ssh training-pc 'wsl ps aux | grep python'
+
+# Correct (grep runs in WSL)
+ssh training-pc 'wsl bash -c "ps aux | grep python"'
 ```
 
-### pip not found
-Use `python3 -m pip` instead of `pip3`
+### Training Not Saving Checkpoints
 
-### pybullet build fails
-Install build tools first:
+Check if training is actually running vs stuck:
+1. `./scripts/remote/training-status.sh` - look at checkpoint timestamps
+2. If no new checkpoints after 30+ min, training may be broken
+3. Check logs: `./scripts/remote/monitor-training.sh 100`
+
+### GPU Memory Issues
+
 ```bash
-ssh ... 'wsl -e bash -c "sudo apt install -y build-essential python3-dev"'
+# Check GPU memory
+ssh training-pc 'nvidia-smi'
+
+# Kill orphaned processes
+./scripts/remote/kill-training.sh
 ```
+
+### Process Won't Die
+
+Use `-9` flag:
+```bash
+ssh training-pc 'wsl bash -c "kill -9 <PID>"'
+```
+
+---
+
+## Hardware Specs
+
+| Component | Spec |
+|-----------|------|
+| GPU | RTX 5080 (16GB VRAM) |
+| RAM | 64GB |
+| CPU | 24 cores |
+| OS | Windows 11 + WSL2 (Ubuntu) |
+
+### Known Limitations
+
+- **No visual rendering** - WSL2 lacks Vulkan support
+- **Isaac Sim 4.5** - RTX 5080 (Blackwell) not officially supported
+- **Training only** - evaluation must be headless (`--headless` flag)
+
+---
+
+## Claude Code Integration
+
+When using Claude Code to interact with the training PC:
+
+1. **Always use DNS name**: `denis.tail07d7b1.ts.net` (not IP addresses)
+2. **Use helper scripts** when possible (avoids quoting hell)
+3. **Check before starting**: Run `./scripts/remote/check-processes.sh` first
+4. **Don't spawn unattended agents** that start long-running processes without explicit user approval
