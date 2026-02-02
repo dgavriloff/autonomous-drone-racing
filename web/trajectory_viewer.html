@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drone Racing Trajectory Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            overflow: hidden;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: calc(100vh - 120px);
+        }
+        #controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(30, 30, 50, 0.95);
+            padding: 15px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            border-top: 1px solid #444;
+        }
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        button {
+            background: #4a4a6a;
+            border: none;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            min-width: 80px;
+        }
+        button:hover {
+            background: #5a5a8a;
+        }
+        button:disabled {
+            background: #333;
+            cursor: not-allowed;
+        }
+        input[type="range"] {
+            flex: 1;
+            height: 6px;
+            -webkit-appearance: none;
+            background: #444;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #7a7aff;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        label {
+            font-size: 13px;
+            color: #aaa;
+            min-width: 100px;
+        }
+        #info {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(30, 30, 50, 0.9);
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        #info strong {
+            color: #7a7aff;
+        }
+        #file-input {
+            display: none;
+        }
+        .speed-display {
+            min-width: 50px;
+            text-align: right;
+            font-family: monospace;
+        }
+        #status {
+            color: #888;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div id="info">
+        <div>Time: <strong id="time-display">0.00s</strong></div>
+        <div>Position: <strong id="pos-display">-</strong></div>
+        <div>Gate: <strong id="gate-display">-</strong></div>
+        <div>Frame: <strong id="frame-display">0 / 0</strong></div>
+    </div>
+
+    <div id="controls">
+        <div class="control-row">
+            <button id="load-btn">Load CSV</button>
+            <button id="sample-btn">Load Sample</button>
+            <button id="play-btn" disabled>Play</button>
+            <button id="reset-btn" disabled>Reset</button>
+            <label>Scrub:</label>
+            <input type="range" id="scrub" min="0" max="100" value="0" disabled>
+            <span id="status">No data loaded</span>
+        </div>
+        <div class="control-row">
+            <label>Speed:</label>
+            <input type="range" id="speed" min="0.1" max="5" step="0.1" value="1">
+            <span class="speed-display" id="speed-display">1.0x</span>
+            <span id="help" style="margin-left: auto; color: #666; font-size: 11px;">Space: play/pause | R: reset | Left/Right: step</span>
+        </div>
+    </div>
+
+    <input type="file" id="file-input" accept=".csv">
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Gate positions for 7-gate track
+        const GATES = [
+            { pos: [3, 0, 1.5], yaw: 0 },
+            { pos: [6, 3, 1.5], yaw: Math.PI / 2 },
+            { pos: [6, 6, 2.0], yaw: Math.PI / 2 },
+            { pos: [3, 9, 1.5], yaw: Math.PI },
+            { pos: [0, 6, 1.5], yaw: -Math.PI / 2 },
+            { pos: [0, 3, 1.5], yaw: -Math.PI / 2 },
+            { pos: [0, 0, 1.5], yaw: 0 }
+        ];
+
+        // State
+        let trajectoryData = [];
+        let currentFrame = 0;
+        let isPlaying = false;
+        let playbackSpeed = 1.0;
+        let lastTimestamp = 0;
+
+        // Three.js objects
+        let renderer, scene, camera, controls;
+        let drone, pathLine, pathGeometry;
+        let gateMeshes = [];
+
+        // DOM elements
+        const container = document.getElementById('canvas-container');
+        const playBtn = document.getElementById('play-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const loadBtn = document.getElementById('load-btn');
+        const sampleBtn = document.getElementById('sample-btn');
+        const scrubSlider = document.getElementById('scrub');
+        const speedSlider = document.getElementById('speed');
+        const speedDisplay = document.getElementById('speed-display');
+        const timeDisplay = document.getElementById('time-display');
+        const posDisplay = document.getElementById('pos-display');
+        const gateDisplay = document.getElementById('gate-display');
+        const frameDisplay = document.getElementById('frame-display');
+        const statusDisplay = document.getElementById('status');
+        const fileInput = document.getElementById('file-input');
+
+        async function init() {
+            // Use WebGL2 renderer (WebGPU support is limited in browsers)
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            console.log('WebGL renderer initialized');
+
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setClearColor(0x1a1a2e);
+            container.appendChild(renderer.domElement);
+
+            // Scene
+            scene = new THREE.Scene();
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(
+                60,
+                container.clientWidth / container.clientHeight,
+                0.1,
+                1000
+            );
+            camera.position.set(3, 4.5, 12);
+            camera.lookAt(3, 4.5, 0);
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(3, 4.5, 0);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            scene.add(directionalLight);
+
+            // Ground plane
+            const groundGeometry = new THREE.PlaneGeometry(20, 20);
+            const groundMaterial = new THREE.MeshStandardMaterial({
+                color: 0x2a2a4a,
+                side: THREE.DoubleSide
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.set(3, 0, 4.5);
+            scene.add(ground);
+
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(20, 20, 0x444466, 0x333355);
+            gridHelper.position.set(3, 0.01, 4.5);
+            scene.add(gridHelper);
+
+            // Create gates
+            createGates();
+
+            // Create drone
+            createDrone();
+
+            // Create path line (empty initially)
+            createPathLine();
+
+            // Setup event listeners
+            setupEventListeners();
+
+            // Start render loop
+            animate();
+        }
+
+        function createGates() {
+            const gateWidth = 1.0;
+            const gateHeight = 1.0;
+            const gateThickness = 0.08;
+
+            GATES.forEach((gate, index) => {
+                const group = new THREE.Group();
+
+                // Gate frame (4 bars)
+                const barMaterial = new THREE.MeshStandardMaterial({
+                    color: index === 0 ? 0x00ff88 : 0xff6644,
+                    emissive: index === 0 ? 0x004422 : 0x441100
+                });
+
+                // Top bar
+                const topBar = new THREE.Mesh(
+                    new THREE.BoxGeometry(gateWidth + gateThickness * 2, gateThickness, gateThickness),
+                    barMaterial
+                );
+                topBar.position.y = gateHeight / 2;
+                group.add(topBar);
+
+                // Bottom bar
+                const bottomBar = new THREE.Mesh(
+                    new THREE.BoxGeometry(gateWidth + gateThickness * 2, gateThickness, gateThickness),
+                    barMaterial
+                );
+                bottomBar.position.y = -gateHeight / 2;
+                group.add(bottomBar);
+
+                // Left bar
+                const leftBar = new THREE.Mesh(
+                    new THREE.BoxGeometry(gateThickness, gateHeight, gateThickness),
+                    barMaterial
+                );
+                leftBar.position.x = -gateWidth / 2;
+                group.add(leftBar);
+
+                // Right bar
+                const rightBar = new THREE.Mesh(
+                    new THREE.BoxGeometry(gateThickness, gateHeight, gateThickness),
+                    barMaterial
+                );
+                rightBar.position.x = gateWidth / 2;
+                group.add(rightBar);
+
+                // Gate number label (simple sphere marker)
+                const labelGeometry = new THREE.SphereGeometry(0.08);
+                const labelMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const label = new THREE.Mesh(labelGeometry, labelMaterial);
+                label.position.y = gateHeight / 2 + 0.15;
+                group.add(label);
+
+                // Position and rotate
+                // Note: CSV uses x,y,z where y is forward, but Three.js uses y as up
+                // Converting: CSV(x,y,z) -> Three.js(x, z, y)
+                group.position.set(gate.pos[0], gate.pos[2], gate.pos[1]);
+                group.rotation.y = gate.yaw;
+
+                scene.add(group);
+                gateMeshes.push(group);
+            });
+        }
+
+        function createDrone() {
+            // Simple drone representation: cube body with 4 rotor spheres
+            const droneGroup = new THREE.Group();
+
+            // Body
+            const bodyGeometry = new THREE.BoxGeometry(0.15, 0.05, 0.15);
+            const bodyMaterial = new THREE.MeshStandardMaterial({
+                color: 0x3388ff,
+                emissive: 0x112244
+            });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            droneGroup.add(body);
+
+            // Rotors (4 small spheres at corners)
+            const rotorGeometry = new THREE.SphereGeometry(0.03);
+            const rotorMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+            const rotorPositions = [
+                [0.08, 0, 0.08],
+                [-0.08, 0, 0.08],
+                [0.08, 0, -0.08],
+                [-0.08, 0, -0.08]
+            ];
+            rotorPositions.forEach(pos => {
+                const rotor = new THREE.Mesh(rotorGeometry, rotorMaterial);
+                rotor.position.set(...pos);
+                droneGroup.add(rotor);
+            });
+
+            // Front indicator
+            const frontGeometry = new THREE.ConeGeometry(0.02, 0.05, 8);
+            const frontMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+            const front = new THREE.Mesh(frontGeometry, frontMaterial);
+            front.rotation.x = Math.PI / 2;
+            front.position.z = 0.1;
+            droneGroup.add(front);
+
+            drone = droneGroup;
+            drone.visible = false;
+            scene.add(drone);
+        }
+
+        function createPathLine() {
+            pathGeometry = new THREE.BufferGeometry();
+            const pathMaterial = new THREE.LineBasicMaterial({
+                color: 0x44aaff,
+                linewidth: 2
+            });
+            pathLine = new THREE.Line(pathGeometry, pathMaterial);
+            pathLine.visible = false;
+            scene.add(pathLine);
+        }
+
+        function updatePathLine(upToFrame) {
+            if (trajectoryData.length === 0) return;
+
+            const positions = [];
+            const endFrame = Math.min(upToFrame + 1, trajectoryData.length);
+
+            for (let i = 0; i < endFrame; i++) {
+                const frame = trajectoryData[i];
+                // Convert CSV coords to Three.js coords
+                positions.push(frame.x, frame.z, frame.y);
+            }
+
+            pathGeometry.setAttribute(
+                'position',
+                new THREE.Float32BufferAttribute(positions, 3)
+            );
+            pathGeometry.computeBoundingSphere();
+            pathLine.visible = true;
+        }
+
+        function setupEventListeners() {
+            loadBtn.addEventListener('click', () => fileInput.click());
+            sampleBtn.addEventListener('click', loadSampleData);
+            fileInput.addEventListener('change', handleFileLoad);
+            playBtn.addEventListener('click', togglePlay);
+            resetBtn.addEventListener('click', resetPlayback);
+
+            scrubSlider.addEventListener('input', (e) => {
+                if (trajectoryData.length === 0) return;
+                currentFrame = Math.floor((e.target.value / 100) * (trajectoryData.length - 1));
+                updateVisualization();
+            });
+
+            speedSlider.addEventListener('input', (e) => {
+                playbackSpeed = parseFloat(e.target.value);
+                speedDisplay.textContent = playbackSpeed.toFixed(1) + 'x';
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+
+            // Keyboard controls
+            window.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT') return; // Don't intercept input fields
+
+                switch (e.code) {
+                    case 'Space':
+                        e.preventDefault();
+                        if (!playBtn.disabled) togglePlay();
+                        break;
+                    case 'KeyR':
+                        if (!resetBtn.disabled) resetPlayback();
+                        break;
+                    case 'ArrowLeft':
+                        e.preventDefault();
+                        if (trajectoryData.length > 0 && currentFrame > 0) {
+                            currentFrame--;
+                            updateVisualization();
+                        }
+                        break;
+                    case 'ArrowRight':
+                        e.preventDefault();
+                        if (trajectoryData.length > 0 && currentFrame < trajectoryData.length - 1) {
+                            currentFrame++;
+                            updateVisualization();
+                        }
+                        break;
+                    case 'Home':
+                        e.preventDefault();
+                        if (trajectoryData.length > 0) {
+                            currentFrame = 0;
+                            updateVisualization();
+                        }
+                        break;
+                    case 'End':
+                        e.preventDefault();
+                        if (trajectoryData.length > 0) {
+                            currentFrame = trajectoryData.length - 1;
+                            updateVisualization();
+                        }
+                        break;
+                }
+            });
+        }
+
+        async function loadSampleData() {
+            statusDisplay.textContent = 'Loading sample...';
+            try {
+                const response = await fetch('sample_trajectory.csv');
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const text = await response.text();
+                parseCSV(text);
+                statusDisplay.textContent = `Loaded: sample_trajectory.csv (${trajectoryData.length} frames)`;
+            } catch (error) {
+                statusDisplay.textContent = `Error loading sample: ${error.message}`;
+                console.error('Failed to load sample:', error);
+            }
+        }
+
+        function handleFileLoad(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                parseCSV(event.target.result);
+                statusDisplay.textContent = `Loaded: ${file.name} (${trajectoryData.length} frames)`;
+            };
+            reader.readAsText(file);
+        }
+
+        function parseCSV(text) {
+            const lines = text.trim().split('\n');
+            trajectoryData = [];
+
+            // Detect header and column mapping
+            const header = lines[0].toLowerCase();
+            const hasHeader = header.includes('timestamp') || header.includes('episode');
+            const startLine = hasHeader ? 1 : 0;
+
+            // Determine column indices based on header
+            // Expected format: episode,step,timestamp,x,y,z,qw,qx,qy,qz,vx,vy,vz,gate_idx,gate_passed,reward
+            // Alternative format: timestamp,x,y,z,qw,qx,qy,qz,gate_idx
+            let cols = {};
+            if (hasHeader) {
+                const headerParts = header.split(',').map(p => p.trim());
+                cols = {
+                    timestamp: headerParts.indexOf('timestamp'),
+                    x: headerParts.indexOf('x'),
+                    y: headerParts.indexOf('y'),
+                    z: headerParts.indexOf('z'),
+                    qw: headerParts.indexOf('qw'),
+                    qx: headerParts.indexOf('qx'),
+                    qy: headerParts.indexOf('qy'),
+                    qz: headerParts.indexOf('qz'),
+                    gateIdx: headerParts.indexOf('gate_idx') >= 0 ? headerParts.indexOf('gate_idx') : headerParts.indexOf('gateidx')
+                };
+            } else {
+                // Default to old format: timestamp,x,y,z,qw,qx,qy,qz,gate_idx
+                cols = { timestamp: 0, x: 1, y: 2, z: 3, qw: 4, qx: 5, qy: 6, qz: 7, gateIdx: 8 };
+            }
+
+            for (let i = startLine; i < lines.length; i++) {
+                const parts = lines[i].split(',').map(p => p.trim());
+                if (parts.length >= 4) {
+                    const getVal = (col, def) => col >= 0 && col < parts.length ? parseFloat(parts[col]) : def;
+                    const getInt = (col, def) => col >= 0 && col < parts.length ? parseInt(parts[col]) : def;
+
+                    trajectoryData.push({
+                        timestamp: getVal(cols.timestamp, i * 0.02),
+                        x: getVal(cols.x, 0),
+                        y: getVal(cols.y, 0),
+                        z: getVal(cols.z, 0),
+                        qw: getVal(cols.qw, 1),
+                        qx: getVal(cols.qx, 0),
+                        qy: getVal(cols.qy, 0),
+                        qz: getVal(cols.qz, 0),
+                        gateIdx: getInt(cols.gateIdx, -1)
+                    });
+                }
+            }
+
+            if (trajectoryData.length > 0) {
+                currentFrame = 0;
+                scrubSlider.disabled = false;
+                scrubSlider.max = 100;
+                playBtn.disabled = false;
+                resetBtn.disabled = false;
+                drone.visible = true;
+                updateVisualization();
+                updatePathLine(trajectoryData.length - 1);
+            }
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            playBtn.textContent = isPlaying ? 'Pause' : 'Play';
+            if (isPlaying) {
+                lastTimestamp = performance.now();
+            }
+        }
+
+        function resetPlayback() {
+            currentFrame = 0;
+            isPlaying = false;
+            playBtn.textContent = 'Play';
+            updateVisualization();
+        }
+
+        function updateVisualization() {
+            if (trajectoryData.length === 0) return;
+
+            const frame = trajectoryData[currentFrame];
+
+            // Update drone position (convert CSV to Three.js coords)
+            drone.position.set(frame.x, frame.z, frame.y);
+
+            // Update drone rotation from quaternion
+            // CSV quaternion: qw, qx, qy, qz in NED or similar frame
+            // Need to convert to Three.js coordinate system
+            const q = new THREE.Quaternion(frame.qx, frame.qz, frame.qy, frame.qw);
+            drone.setRotationFromQuaternion(q);
+
+            // Update path line up to current frame
+            updatePathLine(currentFrame);
+
+            // Update scrub slider
+            scrubSlider.value = (currentFrame / (trajectoryData.length - 1)) * 100;
+
+            // Update info display
+            timeDisplay.textContent = frame.timestamp.toFixed(2) + 's';
+            posDisplay.textContent = `(${frame.x.toFixed(2)}, ${frame.y.toFixed(2)}, ${frame.z.toFixed(2)})`;
+            gateDisplay.textContent = frame.gateIdx >= 0 ? frame.gateIdx : '-';
+            frameDisplay.textContent = `${currentFrame + 1} / ${trajectoryData.length}`;
+
+            // Highlight current target gate
+            gateMeshes.forEach((gate, idx) => {
+                const isTarget = idx === frame.gateIdx;
+                gate.children.forEach(child => {
+                    if (child.material && child.material.emissive) {
+                        child.material.emissive.setHex(isTarget ? 0x004400 : (idx === 0 ? 0x004422 : 0x441100));
+                    }
+                });
+            });
+        }
+
+        function animate(timestamp = 0) {
+            requestAnimationFrame(animate);
+
+            if (isPlaying && trajectoryData.length > 0) {
+                const deltaTime = (timestamp - lastTimestamp) / 1000;
+                lastTimestamp = timestamp;
+
+                // Calculate how many frames to advance based on time and speed
+                const currentTime = trajectoryData[currentFrame].timestamp;
+                const targetTime = currentTime + deltaTime * playbackSpeed;
+
+                // Find the frame closest to target time
+                while (currentFrame < trajectoryData.length - 1 &&
+                       trajectoryData[currentFrame + 1].timestamp <= targetTime) {
+                    currentFrame++;
+                }
+
+                if (currentFrame >= trajectoryData.length - 1) {
+                    isPlaying = false;
+                    playBtn.textContent = 'Play';
+                }
+
+                updateVisualization();
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Initialize
+        init().then(() => {
+            // Check for URL parameter to auto-load a file
+            const params = new URLSearchParams(window.location.search);
+            const csvFile = params.get('csv');
+            if (csvFile) {
+                statusDisplay.textContent = `Loading ${csvFile}...`;
+                fetch(csvFile)
+                    .then(response => {
+                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                        return response.text();
+                    })
+                    .then(text => {
+                        parseCSV(text);
+                        statusDisplay.textContent = `Loaded: ${csvFile} (${trajectoryData.length} frames)`;
+                    })
+                    .catch(error => {
+                        statusDisplay.textContent = `Error: ${error.message}`;
+                        console.error('Failed to load CSV:', error);
+                    });
+            }
+        }).catch(console.error);
+    </script>
+</body>
+</html>
