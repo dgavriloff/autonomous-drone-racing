@@ -21,7 +21,7 @@ from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC
 from scripts.train_parallel import VelocityRacingEnv, create_simple_track
 from scripts.train_vision_student import VisionStudentNetV2, DemoDataset, train_student
 
@@ -54,9 +54,13 @@ class DAggerCollector:
         self.student.eval()
         print(f"Loaded student from {student_path} (num_frames={self.num_frames})")
 
-        # Load teacher (state-based)
-        self.teacher = PPO.load(teacher_path)
-        print(f"Loaded teacher from {teacher_path}")
+        # Load teacher (state-based) - try PPO first, then SAC
+        try:
+            self.teacher = PPO.load(teacher_path)
+            print(f"Loaded teacher (PPO) from {teacher_path}")
+        except Exception:
+            self.teacher = SAC.load(teacher_path)
+            print(f"Loaded teacher (SAC) from {teacher_path}")
 
         self.frame_count = 0
 
