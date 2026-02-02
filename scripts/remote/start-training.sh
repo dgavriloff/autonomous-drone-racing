@@ -10,8 +10,16 @@ VENV="/home/ooousay/repos/isaac-racing-venv"
 
 echo "Starting training: $ITERATIONS iterations, $NUM_ENVS envs"
 
-# Use tmux to keep training alive after SSH disconnect
-ssh training-pc "wsl bash -c \"tmux kill-session -t training 2>/dev/null; tmux new-session -d -s training 'cd $REPO && source $VENV/bin/activate && python scripts/rl/train.py --task Isaac-Drone-Racer-v0 --headless --num_envs $NUM_ENVS --max_iterations $ITERATIONS 2>&1 | tee training.log'\""
+# Create training script on remote (avoids quoting hell)
+# Note: LD_LIBRARY_PATH fix required for Isaac Sim GPU physics in WSL2
+echo "#!/bin/bash
+export LD_LIBRARY_PATH=/usr/lib/wsl/lib:\$LD_LIBRARY_PATH
+cd $REPO
+source $VENV/bin/activate
+python scripts/rl/train.py --task Isaac-Drone-Racer-v0 --headless --num_envs $NUM_ENVS --max_iterations $ITERATIONS 2>&1 | tee training.log" | ssh training-pc 'wsl bash -c "cat > /tmp/run_training.sh && chmod +x /tmp/run_training.sh"'
+
+# Kill any existing training session and start new one
+ssh training-pc 'wsl bash -c "tmux kill-session -t training 2>/dev/null; tmux new-session -d -s training /tmp/run_training.sh"'
 
 echo "Training started in tmux session 'training'"
 echo ""
