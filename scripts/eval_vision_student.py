@@ -102,6 +102,9 @@ def evaluate_vision_student(
             with torch.no_grad():
                 action = model(img).squeeze().cpu().numpy()
 
+            # Reshape for environment (expects 2D array)
+            action = action.reshape(1, -1)
+
             # Step
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
