@@ -196,6 +196,39 @@ def create_competition_track(track_type="swift", scale=1.0, height_variation=0.0
             positions.append([x, y])
         base_height = 0.6
 
+    elif track_type == "tii":
+        # TII Racing style: 11 gates, 170m course (scaled down for pybullet)
+        # Original is ~85m per lap, we scale to fit ~20m radius
+        # Gate positions approximate the TII layout
+        positions = [
+            [8.0, 0.0],      # Gate 1: Start
+            [6.0, 5.0],      # Gate 2: First turn
+            [2.0, 8.0],      # Gate 3
+            [-3.0, 9.0],     # Gate 4: Far corner
+            [-7.0, 6.0],     # Gate 5
+            [-9.0, 1.0],     # Gate 6: Back straight
+            [-8.0, -4.0],    # Gate 7
+            [-4.0, -7.0],    # Gate 8
+            [1.0, -8.0],     # Gate 9: Bottom
+            [5.0, -5.0],     # Gate 10
+            [7.0, -2.0],     # Gate 11: Return
+        ]
+        base_height = 0.6
+
+    elif track_type == "split_s":
+        # Track with altitude changes (inspired by Swift Split-S)
+        positions = [
+            [6.0, 0.0],
+            [4.0, 4.0],
+            [0.0, 6.0],
+            [-4.0, 4.0],
+            [-6.0, 0.0],
+            [-4.0, -4.0],
+            [0.0, -6.0],
+        ]
+        base_height = 0.6
+        # Heights will vary - handled below
+
     elif track_type == "random":
         # Random track within 30x30m bounds
         num_gates = rng.integers(5, 10)
