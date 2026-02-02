@@ -227,7 +227,7 @@ def load_bc_weights_into_ppo(model, bc_checkpoint_path):
     """Load BC weights into PPO's feature extractor."""
     print(f"\nLoading BC weights from: {bc_checkpoint_path}")
 
-    checkpoint = torch.load(bc_checkpoint_path, map_location=model.device)
+    checkpoint = torch.load(bc_checkpoint_path, map_location=model.device, weights_only=False)
     bc_state = checkpoint["model_state_dict"]
 
     # Map BC encoder weights to PPO feature extractor
