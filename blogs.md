@@ -3056,3 +3056,119 @@ torch.save(..., checkpoint_dir / f"epoch_{epoch:03d}.pt")
 In behavioral cloning, **less training can be better**. The optimal policy is found early, before the model overfits to spurious correlations in the action labels. This is fundamentally different from supervised learning where more epochs generally help.
 
 ---
+
+## Entry 43: Checkpoint Sweep - Peak at Epoch 3
+**Date: 2026-02-02**
+
+### Retrained with Checkpointing
+
+Re-ran 20-epoch training with checkpoint saving every epoch. Then evaluated all checkpoints to find the true peak.
+
+### Results
+
+| Epoch | Val Loss | Gates (5 ep) |
+|-------|----------|--------------|
+| 2 | 0.38 | 1.0/5 |
+| **3** | 0.32 | **3.4/5** ← Peak |
+| 4 | 0.25 | 1.4/5 |
+| 5 | 0.18 | 3.0/5 |
+| 6 | 0.12 | 2.2/5 |
+| 8 | 0.06 | 2.0/5 |
+| 10 | 0.024 | 2.8/5 |
+| 16 | 0.021 | 2.2/5 |
+| 20 | 0.021 | ~2.0/5 |
+
+**Confirmed with 10 episodes on epoch 3: 2.9/5 avg, hitting 4/5 in 50% of runs.**
+
+### Key Finding
+
+The optimal checkpoint is **epoch 3** - extremely early! The model learns the core behavior fast, then overfits to noise in the action labels.
+
+Copied epoch 3 checkpoint as `best_model.pt` on training PC.
+
+### Implication
+
+For BC drone racing:
+- Train only 5-10 epochs
+- Save every epoch
+- Eval on actual task to find peak
+- Don't trust validation loss AT ALL
+
+---
+
+## Entry 44: Research - Path Beyond BC
+**Date: 2026-02-02**
+
+### The Question
+
+We're stuck at ~3/5 gates with pure behavioral cloning. What do top teams do to reach 100%?
+
+### Research Findings
+
+**UZH Swift (Nature 2023 - Beat Human Champions)** uses a three-stage approach:
+
+1. **Teacher (RL + privileged state)** - Train with PPO using ground truth
+2. **Student (DAgger)** - Distill to vision using iterative data aggregation
+3. **Student (RL fine-tuning)** - Critical final step
+
+### Why Each Step Matters
+
+| Approach | Success Rate | Lap Time |
+|----------|-------------|----------|
+| Pure BC | 0% | - |
+| DAgger alone | ~100% | 4.60s |
+| DAgger + RL fine-tuning | 100% | **4.27s** |
+| Pure RL from pixels | 0% | - |
+
+**RL fine-tuning provides 10-15% improvement over pure IL.**
+
+### DAgger Algorithm
+
+```python
+for iteration in range(N):
+    # Roll out current student
+    student_states = rollout(student_policy)
+
+    # Query teacher at student's states
+    teacher_actions = teacher(student_states)
+
+    # Aggregate into dataset
+    dataset.add(student_states, teacher_actions)
+
+    # Retrain from current weights
+    student.train(dataset)
+```
+
+The key insight: **collect data where the student actually goes**, not just where the teacher goes.
+
+### RL Fine-tuning Details (UZH Method)
+
+**Phase 1 - Critic Warm-up:**
+- Freeze actor, train only critic for ~100K steps
+- Solves Q-function initialization problem
+
+**Phase 2 - Adaptive Update:**
+- Unfreeze both networks
+- Scale learning rate based on performance ratio
+- Allow larger policy updates as performance improves
+
+### Recommendation for Our Pipeline
+
+```
+Current: BC (epoch 3) → 3/5 gates
+
+Next steps:
+1. DAgger: Collect 10K frames where student fails, query teacher
+2. Retrain from epoch 3 weights with aggregated data
+3. RL fine-tune with PPO + BC regularization
+
+Target: 5/5 gates (100% success rate)
+```
+
+### Data Requirements
+
+UZH uses 5M samples for IL. Our 94K might be insufficient. Consider:
+- 60% budget to IL pretraining
+- 40% budget to RL fine-tuning
+
+---
