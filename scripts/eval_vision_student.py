@@ -54,19 +54,24 @@ def evaluate_vision_student(
             device = "cpu"
     print(f"Device: {device}")
 
-    # Load model
+    # Load checkpoint first to get num_frames
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    num_frames = checkpoint.get("num_frames", 1)
+
+    # Load model with correct num_frames
     model = VisionStudentNetV2(
         action_dim=4,
         hidden_dims=(256, 256),
         device=device,
+        num_frames=num_frames,
     ).to(device)
 
-    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
     print(f"Loaded model from epoch {checkpoint.get('epoch', 'unknown')}")
     print(f"Validation loss: {checkpoint.get('val_loss', 'unknown')}")
+    print(f"Frame stacking: {num_frames}")
     print()
 
     # Create environment
@@ -89,13 +94,29 @@ def evaluate_vision_student(
         total_reward = 0
         steps = 0
 
+        # Frame buffer for stacking
+        frame_buffer = []
+
         while not done:
             # Get camera image
             rgb = env.get_camera_image()
+            rgb_norm = rgb.astype(np.float32) / 255.0
 
-            # Preprocess: (H,W,C) -> (1,C,H,W), normalize
-            img = torch.from_numpy(rgb).float().permute(2, 0, 1).unsqueeze(0)
-            img = img / 255.0
+            # Update frame buffer
+            frame_buffer.append(rgb_norm)
+            if len(frame_buffer) > num_frames:
+                frame_buffer.pop(0)
+
+            # Prepare input (stack frames or pad if not enough history)
+            if len(frame_buffer) < num_frames:
+                # Pad with copies of first frame
+                padded = [frame_buffer[0]] * (num_frames - len(frame_buffer)) + frame_buffer
+            else:
+                padded = frame_buffer
+
+            # Stack along channel dimension
+            stacked = np.concatenate(padded, axis=-1)  # (H,W,C*num_frames)
+            img = torch.from_numpy(stacked).float().permute(2, 0, 1).unsqueeze(0)
             img = img.to(device)
 
             # Get action from vision student

@@ -76,6 +76,7 @@ class TeacherDemoCollector:
         num_gates: int = 5,
         gate_tolerance: float = 0.8,
         save_features: bool = True,
+        noise_scale: float = 0.0,  # DART: inject noise into teacher actions
     ):
         """
         Collect demonstrations from the teacher.
@@ -119,8 +120,14 @@ class TeacherDemoCollector:
                 # Get camera image
                 rgb = env.get_camera_image()
 
-                # Get teacher action
+                # Get teacher action (clean)
                 action, _ = self.teacher.predict(obs, deterministic=True)
+                clean_action = action.copy()
+
+                # DART: inject noise for robustness, but record clean action
+                if noise_scale > 0:
+                    noise = np.random.normal(0, noise_scale, action.shape)
+                    action = np.clip(action + noise, -1, 1)
 
                 # Get ground truth state for debugging
                 state = env._getDroneStateVector(0)
@@ -132,11 +139,11 @@ class TeacherDemoCollector:
                 if self.gatenet is not None and save_features:
                     features = self._extract_features(rgb)
 
-                # Save demonstration
+                # Save demonstration (record clean action, not noisy)
                 frame_data = {
                     "frame_id": self.total_frames,
                     "episode": ep,
-                    "action": action.tolist(),
+                    "action": clean_action.tolist(),
                     "drone_pos": drone_pos.tolist(),
                     "drone_vel": drone_vel.tolist(),
                     "current_gate": env.current_gate,
@@ -289,6 +296,8 @@ def main():
                         help="Path to GateNet for feature extraction")
     parser.add_argument("--no-features", action="store_true",
                         help="Don't save GateNet features")
+    parser.add_argument("--noise", type=float, default=0.0,
+                        help="DART noise scale (0.1-0.2 recommended)")
     args = parser.parse_args()
 
     collector = TeacherDemoCollector(
@@ -302,6 +311,7 @@ def main():
         max_steps=args.max_steps,
         num_gates=args.gates,
         save_features=not args.no_features,
+        noise_scale=args.noise,
     )
 
 

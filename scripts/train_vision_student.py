@@ -132,15 +132,18 @@ class VisionStudentNetV2(nn.Module):
         hidden_dims: Tuple[int, ...] = (256, 256),
         freeze_encoder: bool = True,
         device: str = "cpu",
+        num_frames: int = 1,  # Frame stacking for temporal context
     ):
         super().__init__()
         self.device = device
         self.action_dim = action_dim
         self.freeze_encoder = freeze_encoder
+        self.num_frames = num_frames
 
         # Build encoder from scratch (simpler CNN)
+        in_channels = 3 * num_frames  # Stack frames in channel dimension
         self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, 3, stride=2, padding=1),  # 48x64 -> 24x32
+            nn.Conv2d(in_channels, 32, 3, stride=2, padding=1),  # 48x64 -> 24x32
             nn.ReLU(),
             nn.Conv2d(32, 64, 3, stride=2, padding=1),  # 24x32 -> 12x16
             nn.ReLU(),
@@ -158,7 +161,7 @@ class VisionStudentNetV2(nn.Module):
 
         # Compute encoder output dim
         with torch.no_grad():
-            dummy = torch.zeros(1, 3, 48, 64)
+            dummy = torch.zeros(1, in_channels, 48, 64)
             encoder_dim = self.encoder(dummy).shape[1]
 
         # Policy head
@@ -195,15 +198,43 @@ class VisionStudentNetV2(nn.Module):
 class DemoDataset(Dataset):
     """Dataset for behavioral cloning from teacher demonstrations."""
 
-    def __init__(self, demos_path: str, augment: bool = True):
+    def __init__(self, demos_path: str, augment: bool = True, num_frames: int = 1):
         self.demos_path = Path(demos_path)
         self.augment = augment
+        self.num_frames = num_frames
 
         # Load demonstrations
         with open(self.demos_path / "demos.json", "r") as f:
-            self.demos = json.load(f)
+            all_demos = json.load(f)
 
-        print(f"Loaded {len(self.demos)} demonstration frames")
+        # For frame stacking, we need to filter out frames that don't have
+        # enough history (first num_frames-1 frames of each episode)
+        if num_frames > 1:
+            # Group by episode
+            episodes = {}
+            for demo in all_demos:
+                ep = demo["episode"]
+                if ep not in episodes:
+                    episodes[ep] = []
+                episodes[ep].append(demo)
+
+            # Only keep frames with enough history
+            self.demos = []
+            self.frame_history = {}  # Map from demo index to history indices
+            for ep, frames in episodes.items():
+                frames.sort(key=lambda x: x["frame_id"])
+                for i, frame in enumerate(frames):
+                    if i >= num_frames - 1:  # Has enough history
+                        self.demos.append(frame)
+                        # Store indices of history frames
+                        self.frame_history[len(self.demos) - 1] = [
+                            frames[i - j] for j in range(num_frames - 1, -1, -1)
+                        ]
+        else:
+            self.demos = all_demos
+            self.frame_history = None
+
+        print(f"Loaded {len(self.demos)} demonstration frames (num_frames={num_frames})")
 
     def __len__(self) -> int:
         return len(self.demos)
@@ -211,18 +242,29 @@ class DemoDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         demo = self.demos[idx]
 
-        # Load image
-        rgb = np.load(demo["image_path"])
-        if rgb.shape[-1] == 4:
-            rgb = rgb[:, :, :3]
-
-        # Apply augmentation
-        if self.augment:
-            rgb = self._augment(rgb)
-
-        # Normalize to [0, 1] and convert to tensor
-        rgb = rgb.astype(np.float32) / 255.0
-        rgb_tensor = torch.from_numpy(rgb).permute(2, 0, 1)  # (H,W,C) -> (C,H,W)
+        if self.num_frames > 1 and self.frame_history is not None:
+            # Load stacked frames
+            frames = []
+            for hist_demo in self.frame_history[idx]:
+                rgb = np.load(hist_demo["image_path"])
+                if rgb.shape[-1] == 4:
+                    rgb = rgb[:, :, :3]
+                if self.augment:
+                    rgb = self._augment(rgb)
+                rgb = rgb.astype(np.float32) / 255.0
+                frames.append(rgb)
+            # Stack along channel dimension: (H,W,C*num_frames)
+            stacked = np.concatenate(frames, axis=-1)
+            rgb_tensor = torch.from_numpy(stacked).permute(2, 0, 1)  # (C*num_frames,H,W)
+        else:
+            # Single frame
+            rgb = np.load(demo["image_path"])
+            if rgb.shape[-1] == 4:
+                rgb = rgb[:, :, :3]
+            if self.augment:
+                rgb = self._augment(rgb)
+            rgb = rgb.astype(np.float32) / 255.0
+            rgb_tensor = torch.from_numpy(rgb).permute(2, 0, 1)  # (C,H,W)
 
         # Get action (handle nested list from SB3 predict)
         action = np.array(demo["action"]).squeeze()
@@ -259,6 +301,7 @@ def train_student(
     freeze_encoder: bool = True,
     val_split: float = 0.1,
     device: str = None,
+    num_frames: int = 1,
 ):
     """
     Train vision student via behavioral cloning.
@@ -290,7 +333,7 @@ def train_student(
     print(f"Device: {device}")
 
     # Load dataset
-    dataset = DemoDataset(demos_path, augment=True)
+    dataset = DemoDataset(demos_path, augment=True, num_frames=num_frames)
 
     # Train/val split
     n_val = int(len(dataset) * val_split)
@@ -316,6 +359,7 @@ def train_student(
         hidden_dims=(256, 256),
         freeze_encoder=freeze_encoder,
         device=device,
+        num_frames=num_frames,
     ).to(device)
 
     # Loss and optimizer
@@ -373,6 +417,7 @@ def train_student(
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
                 "val_loss": val_loss,
+                "num_frames": num_frames,
             }, output_path)
 
         if (epoch + 1) % 10 == 0 or epoch == 0:
@@ -416,6 +461,8 @@ def main():
                         help="Fine-tune encoder (don't freeze)")
     parser.add_argument("--device", default=None,
                         help="Device (cuda, mps, cpu)")
+    parser.add_argument("--num-frames", type=int, default=1,
+                        help="Number of frames to stack (1=no stacking, 4 recommended)")
     args = parser.parse_args()
 
     # Create output directory
@@ -430,6 +477,7 @@ def main():
         lr=args.lr,
         freeze_encoder=not args.fine_tune,
         device=args.device,
+        num_frames=args.num_frames,
     )
 
 

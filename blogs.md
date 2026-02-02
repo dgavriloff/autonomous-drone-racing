@@ -2879,3 +2879,82 @@ Option 3: Wait for DCL SDK
 ```
 
 ---
+
+## Entry 40: Vision Student Hits Compounding Error Wall
+**Date: 2026-02-02**
+
+### First Vision Student Results
+
+Trained vision-based behavioral cloning student on 44K demo frames:
+- **Architecture:** CNN encoder (3→32→64→128→256) + MLP head (3072→256→256→4)
+- **Training:** 100 epochs, batch 2048, MSE loss
+- **Best checkpoint:** Epoch 39, val_loss=0.099
+
+### The Problem: 1/5 Gates Consistently
+
+| Model | Gates Passed | Notes |
+|-------|--------------|-------|
+| Teacher (privileged) | 5/5 | 100% success with ground truth state |
+| Student (10 epochs) | 1/5 | Passes gate 1, fails after |
+| Student (100 epochs) | 1/5 | Same result, higher reward though |
+
+**Diagnosis: Compounding Error (Distribution Shift)**
+
+The student makes small prediction errors → enters states not in training data → predictions get worse → cascading failure. This is the classic behavioral cloning limitation.
+
+### Research: What Do Others Do?
+
+Literature review found several solutions:
+
+1. **DART (Disturbances for Augmenting Robot Trajectories)**
+   - Inject noise into teacher actions during demo collection
+   - Record noisy execution but store clean teacher action
+   - Student learns recovery behaviors from perturbed states
+
+2. **Frame Stacking**
+   - Stack N consecutive frames as input (4-8 typical)
+   - Gives model velocity/motion information
+   - Reduces Markovian assumption issues
+
+3. **DAgger (Dataset Aggregation)**
+   - Run student, query teacher for corrections, add to dataset, retrain
+   - Directly addresses distribution shift
+   - More complex, requires iterative training
+
+4. **IL + RL Fine-tuning (UZH approach)**
+   - Initialize with behavioral cloning
+   - Fine-tune with RL (asymmetric actor-critic)
+   - State-of-the-art for drone racing
+
+### Implementation: DART + Frame Stacking
+
+**DART:** Modified `collect_teacher_demos.py`:
+```python
+# Execute noisy action, record clean action
+noise = np.random.normal(0, noise_scale, action.shape)
+noisy_action = np.clip(action + noise, -1, 1)
+env.step(noisy_action)  # Execute with noise
+demos.append(clean_action)  # Store clean
+```
+
+**Frame Stacking:** Modified `VisionStudentNetV2`:
+```python
+in_channels = 3 * num_frames  # Stack in channel dim
+self.encoder = nn.Sequential(
+    nn.Conv2d(in_channels, 32, ...),  # Now accepts 12 channels for 4 frames
+    ...
+)
+```
+
+### Next Steps
+
+1. Collect new demos with DART (noise_scale=0.15)
+2. Train with frame_stacking=4
+3. Evaluate
+4. If still failing, implement DAgger
+
+### Key Insight
+
+Pure behavioral cloning is insufficient for high-performance autonomous flight. The leading drone racing teams (UZH RPG, Swift) all use IL + RL hybrid approaches. DART and frame stacking are quick wins before going full DAgger/RL.
+
+---
