@@ -2032,3 +2032,79 @@ With TensorBoard metrics extraction working, we can iterate without visual evalu
 Running 100K iterations (2x baseline) to see if performance still improving at 50K.
 
 ---
+
+## Entry 29: Telemetry Discovery & Speed Tracking
+**Date: 2026-02-01**
+
+### The Problem
+
+We realized we were "flying blind" - only tracking aggregate rewards (gates passed), not actual telemetry (speed, position, trajectory). How do we know if the drone is going fast enough for competition?
+
+### Discovery: CSV Telemetry Exists!
+
+Found that `play.py --log N` already saves full telemetry to CSV:
+- `px, py, pz` - position
+- `vx, vy, vz` - velocity (m/s)
+- `wx, wy, wz` - angular velocity
+- `w1-w4` - motor speeds (rad/s)
+- `time` - timestamp
+
+### 4:1 Config Speed Data
+
+Analyzed existing CSVs from 4:1 evaluation:
+
+| Episode | Duration | Max Speed | Avg Speed |
+|---------|----------|-----------|-----------|
+| 1 | 1.8s | 16.2 m/s (58 km/h) | 8.4 m/s |
+| 2 | 8.6s | 19.4 m/s (70 km/h) | 11.5 m/s |
+| 3 | 10.2s | **19.6 m/s (71 km/h)** | 11.6 m/s |
+
+**Key finding:** 4:1 config hits **71 km/h** - faster than I reported earlier (14 m/s was wrong).
+
+### WSL2 Evaluation Limitation
+
+Can't run evaluation on 6:1 model because:
+- Isaac Sim requires NVIDIA GPU (CUDA + Vulkan)
+- WSL2: CUDA works (training ✓), Vulkan fails (evaluation ✗)
+- The `play.py` script hangs on Vulkan initialization
+
+Tried:
+- `--headless` flag - still needs Vulkan
+- `--device cpu` - Isaac physics requires GPU
+- Windows native - Isaac Sim not installed there
+
+### Solution: Speed Tracking in Training
+
+Added speed metric directly to training:
+
+```python
+# rewards.py
+def speed(env, asset_cfg=SceneEntityCfg("robot")) -> torch.Tensor:
+    """Track drone speed (velocity magnitude) for logging."""
+    asset = env.scene[asset_cfg.name]
+    return torch.norm(asset.data.root_lin_vel_b, dim=1)
+
+# drone_racer_env_cfg.py
+speed = RewTerm(func=mdp.speed, weight=0.0)  # Logging only
+```
+
+Now `Episode_Reward/speed` will appear in TensorBoard for future runs.
+
+### Lessons Learned
+
+1. **Check what data exists** - CSV telemetry was there all along
+2. **WSL2 has limits** - CUDA yes, Vulkan no
+3. **Add metrics to training** - don't rely on post-hoc evaluation
+4. **71 km/h on 4:1** - actually decent, competition is ~150 km/h
+
+### Competition Speed Context
+
+| Config | Max Speed | Competition Target |
+|--------|-----------|-------------------|
+| 4:1 | 71 km/h | - |
+| 6:1 | ~85+ km/h (estimated) | 150 km/h |
+| 8:1 | Higher | 150 km/h |
+
+Need higher thrust-to-weight and/or speed rewards to reach competition speeds.
+
+---
