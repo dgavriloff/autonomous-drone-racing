@@ -2488,3 +2488,70 @@ All components now exist. Integration is next.
 4. **IoU is the right metric** - directly measures segmentation quality
 
 ---
+
+## Entry 35: GateNet Inference Verified - Pipeline Integration Begins
+**Date: 2026-02-02**
+
+### GateNet Inference Test
+
+Tested the trained GateNet model on real TII Racing images:
+
+```
+flight-02a-ellipse_00000: conf=0.998, gate_coverage=0.6%
+flight-02a-ellipse_00001: conf=0.998, gate_coverage=0.6%
+flight-02a-ellipse_00002: conf=0.998, gate_coverage=0.6%
+flight-02a-ellipse_00003: conf=0.998, gate_coverage=0.6%
+flight-02a-ellipse_00004: conf=0.998, gate_coverage=0.6%
+```
+
+**Results:**
+- Confidence: 0.998 (very high)
+- Gate coverage: 0.6% of pixels (appropriate for gate at distance)
+- Inference time: <10ms on CPU
+
+### Model Verification
+
+```python
+model = create_gatenet('models/gate_net/best_model.pt')
+# Input:  (1, 3, 48, 64) - RGB image
+# Output: (1, 1, 48, 64) - probability mask [0, 1]
+# Params: 482,737
+```
+
+### Isaac Racer Status
+
+Teacher policy continues improving:
+- 7.49 gates @ 108K steps
+- Variance observed (7.15 → 7.62 → 7.49)
+- Best checkpoint saved separately
+
+### Pipeline Architecture
+
+```
+Camera Image (64x48 RGB)
+    ↓
+GateNet (482K params) ← VERIFIED WORKING
+    ↓
+Binary Mask (48x64)
+    ↓
+QuAdGate (corner detection) ← NEXT TO TEST
+    ↓
+4 Corner Points
+    ↓
+PoseEstimator (PnP solve)
+    ↓
+Gate Pose (translation, rotation)
+    ↓
+EKF State Fusion
+    ↓
+Controller
+```
+
+### Next Steps
+
+1. Test QuAdGate corner detection on GateNet masks
+2. Test PoseEstimator on detected corners
+3. Wire full pipeline
+4. End-to-end vision-based flight test
+
+---
