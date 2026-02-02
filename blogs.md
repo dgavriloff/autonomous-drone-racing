@@ -3279,3 +3279,67 @@ envs.step(actions)  # 16x throughput
 ```
 
 ---
+
+## Entry 47: Diagnosis - Gates 4-5 Are The Problem
+**Date: 2026-02-02**
+
+### Diagnosis Results
+
+Ran `scripts/diagnose_student.py` to understand WHY the model fails.
+
+```
+Gate 1: 100% pass ✓
+Gate 2: 100% pass ✓
+Gate 3: 100% pass ✓
+Gate 4:  20% pass ⚠️ (8/10 failures HERE)
+Gate 5:   0% pass ✗
+```
+
+### Key Insight
+
+**This is NOT a general vision failure.** The model:
+- ✅ CAN see gates (passes 1-3 consistently)
+- ✅ CAN navigate (flies correct direction)
+- ❌ Fails specifically at gates 4-5
+
+### Root Cause
+
+**Cumulative error** - Small errors accumulate. By gate 4, drone has drifted enough to miss.
+
+### Implication
+
+RL should help because it optimizes for **task completion**, not action matching. Can learn self-correction.
+
+---
+
+## Entry 48: RL Fine-Tuning Plan
+**Date: 2026-02-02**
+
+### Goal
+
+3.2/5 gates → 5/5 gates using RL fine-tuning.
+
+### Plan
+
+**Step 1:** Verify state-based RL still works (teacher model gets 5/5)
+
+**Step 2:** Create vision-based RL environment:
+- Observation: Camera images (64x48 RGB, 4-frame stack)
+- Action: Velocity commands (same as BC model)
+- Reward: +100 gate pass, +1 progress, -0.1 time, -100 crash
+
+**Step 3:** Initialize from BC checkpoint:
+- Load BC model weights into PPO actor
+- This gives RL a strong starting point (3/5 gates)
+
+**Step 4:** Fine-tune with PPO:
+- 16 parallel envs (use hardware properly!)
+- BC regularization to prevent forgetting
+- ~500K-1M steps
+
+### Success Criteria
+
+- 5/5 gates consistently (>90% success)
+- Then generalize to multiple tracks
+
+---

@@ -12,117 +12,98 @@ Vision-based autonomous drone racing system for the AI Grand Prix competition by
 
 ## Current Status (Updated 2026-02-02)
 
-| Component | Status | Details |
-|-----------|--------|---------|
-| Teacher Policy | ✅ Done | `models/curriculum_final.zip` - 5/5 gates |
-| GateNet | ✅ Done | `models/gate_net/best_model.pt` - 76% IoU |
-| Vision Demos | ✅ Done | 44K frames in `data/teacher_demos/` |
-| Vision Student | 🔄 Next | Behavioral cloning ready to train |
+| Component | Status | Performance |
+|-----------|--------|-------------|
+| Teacher Policy | ✅ Done | 5/5 gates (ground truth) |
+| Vision Student (BC) | ✅ Done | 3.2/5 gates |
+| DAgger | ✅ Tried | 3.2/5 gates (marginal improvement) |
+| **RL Fine-tuning** | 🔄 **NEXT** | Target: 5/5 gates |
 
-## Simulator: gym-pybullet-drones ONLY
+### Current Bottleneck
 
-**DO NOT use Isaac Sim, Flightmare, or AirSim.** We evaluated all options:
+**Diagnosis found:** Gates 1-3 pass 100%, Gates 4-5 fail 80%.
+- Vision works (model CAN see gates)
+- Problem is cumulative error / precision at later gates
+- RL should help (optimizes for task completion, not action matching)
 
-| Simulator | Status | Why Not |
-|-----------|--------|---------|
-| **gym-pybullet-drones** | ✅ USE THIS | Works for everything |
-| Isaac Sim | ❌ Abandoned | Vulkan broken in WSL2, can't render cameras |
-| Flightmare | ❌ Dead | Python 3.6, TensorFlow 1.14, unmaintained since 2020 |
-| AirSim | ❌ Deprecated | Microsoft killed it Dec 2023 |
+## IMPORTANT: Training PC Guidelines
 
-## Training PC
+See `USING_TRAINING_PC.md` for full instructions.
 
-**Use for long training runs.** RTX 5080, 64GB RAM, 24 cores.
+**Key lessons learned:**
+- Use shell scripts with tmux, NOT inline commands
+- BC loss does NOT correlate with task performance
+- Save checkpoints every epoch, eval on actual gates passed
+- Use 16 parallel envs (SubprocVecEnv) to utilize hardware
 
-```bash
-# SSH to training PC
-ssh ooousay@denis.tail07d7b1.ts.net
+## Next Step: RL Fine-Tuning
 
-# Run command in WSL
-wsl <command>
+**Plan (from Entry 48 in blogs.md):**
 
-# Example: pull and train
-wsl bash -c "cd ~/repos/autonomous-drone-racing && git pull"
-```
+1. Verify state-based RL works (teacher already does 5/5)
+2. Create vision RL env (camera obs, velocity actions)
+3. Initialize PPO from BC checkpoint (start at 3/5)
+4. Fine-tune with gate rewards + BC regularization
+5. Use 16 parallel envs (finally use the RTX 5080 properly!)
 
-Note: No venv on training PC for pybullet. Install deps as needed or create one.
-
-## Architecture
-
-### Current: Teacher-Student Pipeline
-```
-1. Teacher (ground truth) → curriculum_final.zip [DONE]
-2. Collect demos (image, action) → 44K frames [DONE]
-3. Train vision student (behavioral cloning) → [IN PROGRESS]
-4. Test vision-only flight → [NEXT]
-```
-
-### Vision Pipeline
-```
-Camera (64x48 RGB)
-    ↓
-GateNet (U-Net, 482K params) → Binary mask
-    ↓
-QuAdGate → 4 corner points
-    ↓
-PoseEstimator (PnP) → Gate pose
-    ↓
-Policy → Velocity commands [vx, vy, vz, yaw_rate]
-```
+**Expected outcome:** 3.2/5 → 5/5 gates
 
 ## Key Files
 
 ### Models
-- `models/curriculum_final.zip` - Teacher policy (5/5 gates)
-- `models/gate_net/best_model.pt` - GateNet segmentation (76% IoU)
+- `models/curriculum_final.zip` - Teacher policy (5/5 gates, state-based)
+- `models/vision_student/best_model.pt` - BC student (3.2/5 gates, vision)
+- `data/dagger/iter_02/model/best_model.pt` - Best DAgger model
 
 ### Scripts
-- `scripts/train_parallel.py` - Train state-based policy
-- `scripts/collect_teacher_demos.py` - Collect vision demos from teacher
-- `scripts/train_vision_student.py` - Behavioral cloning training
-- `scripts/test_vision_pipeline.py` - Test full vision pipeline
+- `scripts/train_parallel.py` - State-based RL training
+- `scripts/train_vision_student.py` - Behavioral cloning
+- `scripts/run_dagger.py` - DAgger pipeline
+- `scripts/diagnose_student.py` - Diagnose where model fails
+- `scripts/eval_vision_student.py` - Evaluate vision model
 
 ### Data
-- `data/teacher_demos/` - 44K (image, action) pairs for BC training
+- `data/dart_demos/` - 94K DART demos (noise-injected)
+- `data/dagger/` - DAgger aggregated data (~400K frames)
 
-## Quick Start
+## Architecture
 
-```bash
-# Activate environment (Mac)
-conda activate drone-racing
-
-# Train vision student
-python scripts/train_vision_student.py --demos data/teacher_demos --epochs 100
-
-# Test vision pipeline
-python scripts/test_vision_pipeline.py --model models/curriculum_final.zip
+### Vision Pipeline (Working)
+```
+Camera (64x48 RGB, 4 frames)
+    ↓
+VisionStudentNetV2 (CNN encoder + MLP, 1.2M params)
+    ↓
+Velocity commands [vx, vy, vz, yaw_rate]
 ```
 
-## Speed Limits
+### What's Been Tried
 
-| Config | Speed | Notes |
-|--------|-------|-------|
-| Default | 0.25 m/s | Library hardcoded (SPEED_LIMIT bug) |
-| Fixed | 4.17 m/s | Override in train_parallel.py |
-| CF2X Max | 8.33 m/s | Drone physics limit |
+| Approach | Result | Issue |
+|----------|--------|-------|
+| Pure BC | 2.9/5 | Compounding error |
+| DART + Frame stacking | 3.0/5 | Still compounding |
+| DAgger (3 iterations) | 3.2/5 | Underfitting, slow collection |
+| **RL Fine-tuning** | TBD | **Next step** |
 
-Speed is NOT the bottleneck. Vision is. 8 m/s is plenty for validation.
+## Training PC
 
-## Archived (Do Not Use)
+RTX 5080, 64GB RAM, 24 cores via SSH + Tailscale.
 
-The following files are historical and relate to abandoned Isaac Sim work:
-- `archive/AERIAL_GYM_PORT_PLAN.md`
-- `archive/COMPETITION_DRONE_SPECS.md`
-- `archive/IMPROVEMENT_PLAN.md`
-- `archive/OPTIMIZATION_LOOP.md`
+```bash
+# Sync and run
+git push
+ssh ooousay@denis.tail07d7b1.ts.net "wsl git -C /home/ooousay/repos/autonomous-drone-racing pull"
+ssh ooousay@denis.tail07d7b1.ts.net 'wsl tmux new-session -d -s train /path/to/script.sh'
+```
 
 ## TODO
 
 1. ✅ ~~Train teacher policy~~ (5/5 gates)
-2. ✅ ~~Train GateNet~~ (76% IoU)
-3. ✅ ~~Collect vision demos~~ (44K frames)
-4. 🔄 **Train vision student** ← CURRENT
-5. ⬜ Test vision-only flight
-6. ⬜ DAgger refinement (if needed)
+2. ✅ ~~Train BC student~~ (3.2/5 gates)
+3. ✅ ~~Try DAgger~~ (marginal improvement)
+4. ✅ ~~Diagnose failures~~ (gates 4-5 are the problem)
+5. 🔄 **RL Fine-tuning** ← CURRENT
+6. ⬜ Multi-track generalization
 7. ⬜ Domain randomization
 8. ⬜ DCL SDK integration (April 2026)
