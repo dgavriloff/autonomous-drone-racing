@@ -224,8 +224,9 @@ class DemoDataset(Dataset):
         rgb = rgb.astype(np.float32) / 255.0
         rgb_tensor = torch.from_numpy(rgb).permute(2, 0, 1)  # (H,W,C) -> (C,H,W)
 
-        # Get action
-        action = torch.tensor(demo["action"], dtype=torch.float32)
+        # Get action (handle nested list from SB3 predict)
+        action = np.array(demo["action"]).squeeze()
+        action = torch.tensor(action, dtype=torch.float32)
 
         return rgb_tensor, action
 
