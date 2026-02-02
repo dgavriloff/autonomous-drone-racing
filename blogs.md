@@ -2617,3 +2617,167 @@ All components now verified working:
 Wire camera → full pipeline → controller for autonomous vision-based flight.
 
 ---
+
+## Entry 37: Vision Student Training Pipeline
+**Date: 2026-02-02**
+
+### THE PLAN: Teacher-Student Distillation
+
+After research into best practices, implementing vision-based policy through behavioral cloning:
+
+```
+Phase 1: Collect Teacher Demos
+├── Run curriculum_final.zip (5/5 gates teacher)
+├── Enable PyBullet camera (64x48 RGB)
+├── Save (image, action) pairs
+└── Target: 10,000+ frames
+
+Phase 2: Behavioral Cloning
+├── Student: CNN encoder + MLP policy
+├── Input: Camera image
+├── Output: Velocity commands [vx, vy, vz, yaw_rate]
+├── Loss: MSE(student_action, teacher_action)
+└── Train until convergence
+
+Phase 3: DAgger Refinement (if needed)
+├── Run student, collect failure states
+├── Query teacher for correct actions
+├── Aggregate data, retrain
+└── Repeat 3-5 iterations
+```
+
+### Key Decision: gym-pybullet-drones for Vision
+
+Isaac Sim requires Vulkan for camera rendering, which doesn't work in WSL2:
+- CUDA: ✅ Works (RTX 5080 via /dev/dxg)
+- Vulkan: ❌ CPU-only (llvmpipe software rendering)
+
+Solution: Use gym-pybullet-drones which has full camera support via OpenGL.
+
+### Assets Available
+
+| Asset | Path | Status |
+|-------|------|--------|
+| Teacher Policy | `models/curriculum_final.zip` | ✅ 5/5 gates |
+| GateNet | `models/gate_net/best_model.pt` | ✅ 76% IoU |
+| Data Collector | `scripts/collect_teacher_demos.py` | ✅ Created |
+| Student Trainer | `scripts/train_vision_student.py` | ✅ Created |
+
+### Architecture: VisionStudentNetV2
+
+```python
+Camera (64x48x3)
+    ↓
+CNN Encoder:
+    Conv2d(3→32, stride=2)   # 48x64 → 24x32
+    Conv2d(32→64, stride=2)  # 24x32 → 12x16
+    Conv2d(64→128, stride=2) # 12x16 → 6x8
+    Conv2d(128→256, stride=2)# 6x8 → 3x4
+    Flatten                  # 3072 dims
+    ↓
+MLP Policy Head:
+    Linear(3072→256) + ReLU + LayerNorm
+    Linear(256→256) + ReLU + LayerNorm
+    Linear(256→4) + Tanh    # Actions in [-1,1]
+    ↓
+Velocity Commands [vx, vy, vz, yaw_rate]
+```
+
+### Training Pipeline Execution
+
+Starting now:
+1. Collect 200 episodes of teacher demos (~20K frames)
+2. Train vision student via BC
+3. Test on vision-only racing
+
+---
+
+## Entry 38: Isaac Sim Abandoned - Vulkan Kills Vision Training
+**Date: 2026-02-02**
+
+### The Realization
+
+After 11 hours of Isaac Racer training, asked the hard question: "What's the point?"
+
+**Isaac Sim Final Stats:**
+| Metric | Value |
+|--------|-------|
+| Gates Passed | **8.54** (max 9.19) |
+| Total Reward | 204.78 |
+| Steps Trained | 648K / 1.2M |
+| Track | 7 gates (completing 1+ laps) |
+
+The teacher is excellent. But we can't use it for vision training.
+
+### The Blocker: Vulkan in WSL2
+
+```
+WSL2 GPU Support:
+├── CUDA:   ✅ Works (training runs fine)
+├── Vulkan: ❌ CPU-only (llvmpipe software rendering)
+└── Result: No camera rendering possible
+```
+
+Isaac Sim requires Vulkan for camera/rendering. NVIDIA doesn't expose Vulkan through WSL2's /dev/dxg interface - only CUDA compute.
+
+**Options considered:**
+1. Native Windows Isaac Sim - RTX 5080 (sm_120) incompatible with stable PyTorch
+2. Dual boot Linux - Too much setup overhead
+3. Wait for software updates - Competition is April 2026
+
+### The Pivot
+
+**gym-pybullet-drones works for everything:**
+- State-based training: ✅ (curriculum_final.zip, 5/5 gates)
+- Camera rendering: ✅ (OpenGL, works everywhere)
+- Vision training: ✅ (44K demo frames collected)
+
+We don't need Isaac Sim. The whole point was speed + cameras, but without cameras it's just a faster version of what we already have working.
+
+### What Isaac Sim Gave Us
+
+Not nothing - the research was valuable:
+1. Confirmed 8+ gates achievable with proper rewards
+2. Validated gate_reward=800 (2x crash penalty) approach
+3. Proved 8192 parallel envs feasible on RTX 5080
+4. Learned about Vulkan/CUDA split in WSL2
+
+### Demo Collection Success
+
+Before killing Isaac training, collected vision demos locally:
+
+```
+Teacher: curriculum_final.zip (gym-pybullet-drones)
+Episodes: 50
+Frames: 44,385
+Success rate: 100% (5/5 gates every episode)
+Data size: ~500MB
+```
+
+This is enough for behavioral cloning.
+
+### Lessons Learned
+
+1. **Check the full pipeline before committing** - Training worked, but vision didn't
+2. **WSL2 is CUDA-only** - Vulkan/OpenGL need native OS or proper Linux
+3. **Simpler tools often win** - gym-pybullet-drones does everything we need
+4. **Don't over-engineer** - Isaac Sim is overkill when PyBullet works
+
+### Current State
+
+| Component | Tool | Status |
+|-----------|------|--------|
+| Teacher Policy | gym-pybullet-drones | ✅ 5/5 gates |
+| Vision Data | gym-pybullet-drones | ✅ 44K frames |
+| GateNet | PyTorch | ✅ 76% IoU |
+| Student Training | PyTorch | Ready to run |
+| Isaac Sim | Killed | Was redundant |
+
+### Next: Train Vision Student
+
+All pieces in place for behavioral cloning:
+1. Camera images (44K frames)
+2. Teacher actions (velocity commands)
+3. Student architecture (CNN + MLP)
+
+---
