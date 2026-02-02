@@ -2108,3 +2108,69 @@ Now `Episode_Reward/speed` will appear in TensorBoard for future runs.
 Need higher thrust-to-weight and/or speed rewards to reach competition speeds.
 
 ---
+
+## Entry 30: Windows Native Isaac Sim Setup
+**Date: 2026-02-01**
+
+### Goal
+
+Set up Isaac Sim on Windows native (not WSL) to enable visual evaluation - WSL2 has no Vulkan support.
+
+### What We Did
+
+1. **Created Windows environment at** `C:\Users\ooousay\Documents\repos\training\airgrandprix`
+2. **Installed packages:**
+   - IsaacLab v2.1.0 (isaaclab 0.36.21)
+   - Isaac Sim 4.5.0
+   - isaac_drone_racer
+   - skrl, pandas, scienceplots
+
+### Key Finding: RTX 5080 (Blackwell) Compatibility
+
+**Problem:** RTX 5080 uses sm_120 (Blackwell architecture), which is too new for most torch builds.
+
+| torch version | CUDA | sm_120 support | Isaac Sim compat |
+|---------------|------|----------------|------------------|
+| 2.6.0+cu124 | 12.4 | ❌ (max sm_90) | ✅ Works |
+| 2.11.0.dev+cu126 | 12.6 | ✅ | ❌ DLL conflict |
+| 2.11.0.dev+cu128 | 12.8 | ✅ | ❌ DLL conflict |
+
+**The dilemma:**
+- torch stable (2.6.0+cu124): Works with Isaac Sim, but doesn't support sm_120
+- torch nightly (cu126/cu128): Supports sm_120, but DLL conflicts with Isaac Sim on Windows
+
+**Why WSL works:** The nightly torch works in WSL because Linux uses different shared library loading. Windows has DLL conflicts between torch's CUDA runtime and Isaac Sim's.
+
+### What We Verified
+
+1. **Isaac Sim rendering works on Windows** - GPU detected, Vulkan functional:
+   ```
+   NVIDIA GeForce RTX 5080, Active: Yes, 15889 MB
+   Driver Version: 577.00, Graphics API: D3D12
+   Simulation App Startup Complete (after 170s shader compilation)
+   ```
+
+2. **First-run downloads extensions** - takes ~2 minutes to download ~50 extensions from NVIDIA registry
+
+3. **EULA acceptance** - requires `OMNI_KIT_ACCEPT_EULA=Y` env var or `EULA_ACCEPTED` file
+
+### Workaround for Now
+
+Continue using WSL for training and TensorBoard metrics for evaluation until:
+- PyTorch adds stable sm_120 support (likely torch 2.7+)
+- Or Isaac Sim updates to be compatible with torch nightly DLLs
+
+### Files Modified
+
+- Cleaned WSL workspace (deleted 7.7GB unused repos)
+- Created Windows conda env `isaac-racing` with all dependencies
+- Copied best_agent.pt from WSL to Windows for future testing
+
+### Lessons Learned
+
+1. **New GPUs need time** - RTX 5080 Blackwell (sm_120) is bleeding edge
+2. **WSL ≠ Windows** - shared library loading behaves differently
+3. **Isaac Sim has complex deps** - specific torch versions required
+4. **Multiple environments** - need WSL for training, Windows for visual eval (once compatible)
+
+---
