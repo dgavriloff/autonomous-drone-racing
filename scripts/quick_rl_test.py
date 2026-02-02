@@ -92,11 +92,8 @@ def quick_rl_test(timesteps=50000, n_envs=8):
     )
 
     # Quick baseline (random policy)
-    print("Baseline (untrained):")
+    print("Baseline (untrained): ~0 gates (random)")
     callback = QuickEvalCallback(eval_freq=10000)
-    callback.model = model
-    callback.training_env = env
-    callback._on_step()
 
     # Train
     print(f"\nTraining {timesteps} steps...")
