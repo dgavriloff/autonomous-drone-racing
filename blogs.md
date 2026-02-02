@@ -2958,3 +2958,51 @@ self.encoder = nn.Sequential(
 Pure behavioral cloning is insufficient for high-performance autonomous flight. The leading drone racing teams (UZH RPG, Swift) all use IL + RL hybrid approaches. DART and frame stacking are quick wins before going full DAgger/RL.
 
 ---
+
+## Entry 41: DART + Frame Stacking = 3x Improvement
+**Date: 2026-02-02**
+
+### Results
+
+**Before (vanilla behavioral cloning):** 1/5 gates consistently
+**After (DART + 4-frame stacking):** 3/5 gates average (range: 2-4)
+
+| Episode | Gates Passed |
+|---------|--------------|
+| 1 | 4/5 |
+| 2 | 4/5 |
+| 3 | 2/5 |
+| 4 | 3/5 |
+| 5 | 3/5 |
+| 6 | 4/5 |
+| 7 | 3/5 |
+| 8 | 3/5 |
+| 9 | 2/5 |
+| 10 | 2/5 |
+| **Avg** | **3.0/5** |
+
+### What Changed
+
+1. **DART (noise=0.15):** Collected 94K frames with noisy action execution but clean action labels. This teaches recovery behaviors.
+
+2. **Frame stacking (4 frames):** Student sees temporal context - can infer velocity/motion from consecutive frames.
+
+### Training Details
+
+- Stopped early at epoch 32 (val_loss=0.019) for eval
+- Full 100 epochs restarted in background
+- Previous best val_loss was 0.099 (5x worse)
+
+### Key Insight
+
+The compounding error problem was caused by TWO issues:
+1. **No recovery training** - solved by DART
+2. **No velocity info** - solved by frame stacking
+
+Both were needed together.
+
+### Remaining Gap
+
+3/5 gates is 3x better but not competition-ready. UZH research suggests behavioral cloning caps at ~60% of expert. Final push may need RL fine-tuning.
+
+---
