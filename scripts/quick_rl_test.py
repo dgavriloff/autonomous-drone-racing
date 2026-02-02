@@ -97,7 +97,7 @@ def quick_rl_test(timesteps=50000, n_envs=8):
 
     # Train
     print(f"\nTraining {timesteps} steps...")
-    model.learn(total_timesteps=timesteps, callback=callback, progress_bar=True)
+    model.learn(total_timesteps=timesteps, callback=callback, progress_bar=False)
 
     # Final eval
     print("\nFinal evaluation (10 episodes):")
