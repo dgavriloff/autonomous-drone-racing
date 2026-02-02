@@ -284,6 +284,37 @@ def load_bc_weights_into_ppo(model, bc_checkpoint_path):
             else:
                 print(f"  ✗ {bc_key}: shape mismatch {bc_state[bc_key].shape} vs {ppo_state[ppo_key].shape}")
 
+    # Map BC policy_head.6 (Linear 256->4) to PPO action_net (final action layer)
+    bc_to_ppo_action = {
+        "policy_head.6.weight": "action_net.weight",
+        "policy_head.6.bias": "action_net.bias",
+    }
+    for bc_key, ppo_key in bc_to_ppo_action.items():
+        if bc_key in bc_state and ppo_key in ppo_state:
+            if bc_state[bc_key].shape == ppo_state[ppo_key].shape:
+                ppo_state[ppo_key] = bc_state[bc_key]
+                weights_loaded += 1
+                print(f"  ✓ {bc_key} -> {ppo_key}")
+            else:
+                print(f"  ✗ {bc_key}: shape mismatch {bc_state[bc_key].shape} vs {ppo_state[ppo_key].shape}")
+
+    # Also load encoder + policy_head.0 into pi_features_extractor (policy uses this)
+    for bc_key, bc_tensor in bc_state.items():
+        if bc_key.startswith("encoder."):
+            ppo_key = bc_key.replace("encoder.", "pi_features_extractor.cnn.")
+            if ppo_key in ppo_state and ppo_state[ppo_key].shape == bc_tensor.shape:
+                ppo_state[ppo_key] = bc_tensor
+                weights_loaded += 1
+                print(f"  ✓ {bc_key} -> {ppo_key}")
+
+    # Load policy_head.0 into pi_features_extractor.linear.0
+    if "policy_head.0.weight" in bc_state and "pi_features_extractor.linear.0.weight" in ppo_state:
+        if bc_state["policy_head.0.weight"].shape == ppo_state["pi_features_extractor.linear.0.weight"].shape:
+            ppo_state["pi_features_extractor.linear.0.weight"] = bc_state["policy_head.0.weight"]
+            ppo_state["pi_features_extractor.linear.0.bias"] = bc_state["policy_head.0.bias"]
+            weights_loaded += 2
+            print(f"  ✓ policy_head.0 -> pi_features_extractor.linear.0")
+
     # Load the updated state dict
     model.policy.load_state_dict(ppo_state)
     print(f"\nLoaded {weights_loaded} weight tensors from BC checkpoint")
