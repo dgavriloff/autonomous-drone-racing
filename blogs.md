@@ -3172,3 +3172,48 @@ UZH uses 5M samples for IL. Our 94K might be insufficient. Consider:
 - 40% budget to RL fine-tuning
 
 ---
+
+## Entry 45: DAgger Implementation
+**Date: 2026-02-02**
+
+### Implementation
+
+Created `scripts/run_dagger.py` - full DAgger pipeline for vision-based drone racing.
+
+**Algorithm:**
+```
+for iteration in [0, 1, 2]:
+    1. Roll out current student (vision-based)
+    2. At each state, query teacher (state-based) for correct action
+    3. Save: (student_observation, teacher_action) pairs
+    4. Merge with existing dataset
+    5. Retrain student for N epochs
+    6. Evaluate
+    7. Decay beta (teacher mixing probability)
+```
+
+**Key Parameters:**
+- `--iterations 3`: Number of DAgger rounds
+- `--episodes 50`: Episodes per round
+- `--epochs 10`: Training epochs per round (short to avoid overfitting)
+- `--beta-start 0.5`: Initial teacher action probability
+- `--beta-decay 0.5`: Decay each iteration (0.5 → 0.25 → 0.125)
+
+### Usage
+
+```bash
+python scripts/run_dagger.py \
+    --student models/vision_student/best_model.pt \
+    --teacher models/curriculum_final.zip \
+    --data data/dart_demos \
+    --iterations 3
+```
+
+### Expected Outcome
+
+- BC alone: 3/5 gates (60%)
+- After DAgger: ~5/5 gates (100%)
+
+Key improvement: training on states the student actually visits.
+
+---
