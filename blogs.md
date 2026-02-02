@@ -2412,3 +2412,79 @@ The hard problems are **already solved**:
 4. **Be definitive** - assessed feasibility honestly, stopped hedging
 
 ---
+
+## Entry 34: GateNet Trained - 76% IoU on Real Racing Data
+**Date: 2026-02-02**
+
+### The Achievement
+
+Trained GateNet on TII Racing dataset in 31 minutes on RTX 5080:
+
+| Metric | Start | End | Change |
+|--------|-------|-----|--------|
+| Train Loss | 0.54 | 0.17 | -68% |
+| Val IoU | 0.38 | **0.76** | +100% |
+| Epochs | 0 | 50 | Complete |
+
+**76% IoU** on real drone racing gate images - solid foundation for vision pipeline.
+
+### What We Did
+
+1. **Downloaded TII Racing Dataset**
+   - 63,399 images from autonomous flights
+   - Gate annotations with 4 corner keypoints
+   - High-speed flight data (>21 m/s)
+
+2. **Created Data Converter**
+   - `scripts/convert_tii_to_masks.py`
+   - Converts corner keypoints → binary segmentation masks
+   - Resizes to 64x48 for lightweight inference
+
+3. **Trained GateNet**
+   - U-Net architecture, 482K parameters
+   - BCE + Dice loss (50/50)
+   - Batch size 128, 50 epochs
+   - RTX 5080: 31 minutes total
+
+### Parallel Training Success
+
+Ran two trainings simultaneously on same GPU:
+
+| Training | GPU Share | Result |
+|----------|-----------|--------|
+| Isaac Racer | ~25% | 7.49 gates @ 108K |
+| GateNet | ~25% | 76% IoU |
+
+GPU stayed at 55°C - excellent thermal headroom.
+
+### Files Created
+
+- `models/gate_net/best_model.pt` (5.8MB)
+- `models/gate_net/final_model.pt` (5.8MB)
+- `models/gate_net/history.json` (training curves)
+- `models/gate_net/training_curves.png`
+
+### Architecture Recap
+
+```
+Camera → GateNet → QuAdGate → PoseEstimator → EKF → Controller
+         [DONE]    [EXISTS]    [EXISTS]       [EXISTS] [DONE]
+```
+
+All components now exist. Integration is next.
+
+### Next Steps
+
+1. Copy trained GateNet model to local machine
+2. Test GateNet inference on sample images
+3. Wire full vision pipeline
+4. End-to-end test with camera input
+
+### Lessons Learned
+
+1. **Real data > synthetic** - TII dataset gave us proven racing scenarios
+2. **Parallel training works** - GPU sharing is efficient when neither saturates
+3. **Small models train fast** - 482K params = 31 min on RTX 5080
+4. **IoU is the right metric** - directly measures segmentation quality
+
+---
