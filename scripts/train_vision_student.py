@@ -410,7 +410,7 @@ def train_student(
         history["train_loss"].append(train_loss)
         history["val_loss"].append(val_loss)
 
-        # Save best model
+        # Save best model (by val loss)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save({
@@ -419,6 +419,16 @@ def train_student(
                 "val_loss": val_loss,
                 "num_frames": num_frames,
             }, output_path)
+
+        # Save checkpoint every epoch (BC loss doesn't correlate with task performance!)
+        checkpoint_dir = Path(output_path).parent / "checkpoints"
+        checkpoint_dir.mkdir(exist_ok=True)
+        torch.save({
+            "model_state_dict": model.state_dict(),
+            "epoch": epoch,
+            "val_loss": val_loss,
+            "num_frames": num_frames,
+        }, checkpoint_dir / f"epoch_{epoch:03d}.pt")
 
         if (epoch + 1) % 10 == 0 or epoch == 0:
             print(f"Epoch {epoch+1}/{epochs}: train_loss={train_loss:.6f}, "

@@ -18,9 +18,12 @@ fi
 # Run training
 echo ""
 echo "Starting training..."
+# NOTE: BC loss does NOT correlate with task performance!
+# Model typically peaks at epoch 10-15, then overfits.
+# Checkpoints saved every epoch in models/vision_student/checkpoints/
 python -u scripts/train_vision_student.py \
     --demos data/dart_demos \
-    --epochs 100 \
+    --epochs 20 \
     --batch-size 2048 \
     --num-frames 4 \
     --device cuda \

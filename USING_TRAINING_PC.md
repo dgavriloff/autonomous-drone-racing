@@ -60,6 +60,12 @@ ssh ooousay@denis.tail07d7b1.ts.net "wsl nvidia-smi"
 ❌ Not monitoring
 → Training can crash silently. Always launch a monitor subagent.
 
+❌ Training for 100 epochs without checkpointing
+→ BC loss does NOT correlate with task performance! Model peaked at epoch 12 (3.6/5 gates) but continued training dropped to 2.6/5 gates. Always save checkpoints every epoch.
+
+❌ Using val_loss to pick best model
+→ Lower MSE loss ≠ better gates passed. Eval on actual task (gates passed) to find best checkpoint.
+
 ---
 
 ## Key Paths

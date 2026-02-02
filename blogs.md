@@ -3006,3 +3006,53 @@ Both were needed together.
 3/5 gates is 3x better but not competition-ready. UZH research suggests behavioral cloning caps at ~60% of expert. Final push may need RL fine-tuning.
 
 ---
+
+## Entry 42: BC Loss Does NOT Correlate with Task Performance
+**Date: 2026-02-02**
+
+### The Problem
+
+Ran 100 epochs of vision student training, monitoring only validation loss. Training looked great - loss kept dropping from 0.48 → 0.019. But actual gate performance:
+
+| Epoch | Val Loss | Gates Passed |
+|-------|----------|--------------|
+| 12 | 0.025 | **3.6/5** ← Peak |
+| 20 | 0.024 | 2.6/5 |
+| 30 | 0.020 | 2.6/5 |
+| 45 | 0.019 | 2.6/5 |
+
+**The model peaked at epoch 12, then performance DEGRADED despite loss improving.**
+
+### Root Cause
+
+MSE loss on actions measures "how well does the student copy the teacher on the training distribution?" But task performance depends on:
+1. **Critical decision points** - a few bad actions near gates matter more than average accuracy
+2. **Distribution shift** - student enters states not in training data
+3. **Compounding errors** - small mistakes cascade
+
+The model was overfitting to average-case imitation while losing critical edge behaviors.
+
+### The Fix
+
+1. **Save checkpoints every epoch** - Added to `train_vision_student.py`:
+```python
+checkpoint_dir = Path(output_path).parent / "checkpoints"
+torch.save(..., checkpoint_dir / f"epoch_{epoch:03d}.pt")
+```
+
+2. **Reduced epochs to 20** - Peak is usually epoch 10-15
+
+3. **Eval on task, not loss** - Pick best checkpoint by gates passed, not val_loss
+
+### Updated Guidelines (USING_TRAINING_PC.md)
+
+- BC loss does NOT correlate with task performance
+- Always save checkpoints every epoch
+- Eval actual task (gates passed) to find best model
+- Don't trust val_loss for early stopping
+
+### Key Insight
+
+In behavioral cloning, **less training can be better**. The optimal policy is found early, before the model overfits to spurious correlations in the action labels. This is fundamentally different from supervised learning where more epochs generally help.
+
+---
