@@ -1,178 +1,109 @@
 # Using the Training PC
 
-Remote training machine (Windows + WSL2 + RTX 5080) accessed via SSH through Tailscale.
-
-## Quick Reference
-
-```bash
-# SSH to training PC
-ssh ooousay@denis.tail07d7b1.ts.net
-
-# Run WSL command
-ssh ooousay@denis.tail07d7b1.ts.net "wsl <command>"
-
-# Check running processes
-ssh ooousay@denis.tail07d7b1.ts.net "wsl ps aux" | grep python
-
-# Check GPU
-ssh ooousay@denis.tail07d7b1.ts.net "wsl nvidia-smi"
-```
+Remote training machine (Windows + WSL2 + RTX 5080) via SSH + Tailscale.
 
 ---
 
-## CRITICAL: Running Long Training Jobs
+## 🚨 FOR AGENTS: How to Run Training
 
-### The Right Way (use scripts, not inline commands)
+**NEVER use inline commands with tmux. ALWAYS use a shell script.**
 
-**Problem:** tmux + SSH + WSL + nested quotes = disaster. Commands fail silently.
-
-**Solution:** Always use a shell script on the remote, never inline commands.
-
-### Step 1: Create/update your training script locally
-
+### Step 1: Edit the training script locally
 ```bash
-# Example: scripts/run_training.sh
-#!/bin/bash
-set -e  # Exit on error
-cd ~/repos/autonomous-drone-racing
-source ~/repos/pybullet-venv/bin/activate
-export PYTHONUNBUFFERED=1
-
-# Backup existing model
-if [ -f models/vision_student/best_model.pt ]; then
-    cp models/vision_student/best_model.pt models/vision_student/best_model.backup.pt
-    echo "Backed up existing model"
-fi
-
-# Run training
-python -u scripts/train_vision_student.py \
-    --demos data/dart_demos \
-    --epochs 100 \
-    --batch-size 2048 \
-    --num-frames 4 \
-    --device cuda \
-    2>&1 | tee /tmp/training.log
-
-echo "=== TRAINING COMPLETE ==="
+# Edit scripts/run_training.sh with your training command
 ```
 
-### Step 2: Push and pull
-
+### Step 2: Push to remote
 ```bash
-git add scripts/run_training.sh && git commit -m "Update training script" && git push
+git add -A && git commit -m "Update training" && git push
 ssh ooousay@denis.tail07d7b1.ts.net "wsl git -C /home/ooousay/repos/autonomous-drone-racing pull"
 ```
 
-### Step 3: Start in tmux
-
+### Step 3: Start training in tmux
 ```bash
-ssh ooousay@denis.tail07d7b1.ts.net "wsl tmux new-session -d -s train /home/ooousay/repos/autonomous-drone-racing/scripts/run_training.sh"
+ssh ooousay@denis.tail07d7b1.ts.net 'wsl tmux new-session -d -s train /home/ooousay/repos/autonomous-drone-racing/scripts/run_training.sh'
 ```
 
-### Step 4: Monitor
+### Step 4: Launch a monitor subagent
+```
+Use Task tool with subagent_type="Bash" and run_in_background=true.
+Have it check every 2 min:
+  ssh ooousay@denis.tail07d7b1.ts.net 'wsl tmux capture-pane -t train -p' | tail -20
+Report when "=== ALL DONE ===" appears or process stops.
+```
 
+### Step 5: Check status manually (optional)
 ```bash
-# Check tmux output
-ssh ooousay@denis.tail07d7b1.ts.net "wsl tmux capture-pane -t train -p" | tail -20
+# Tmux output
+ssh ooousay@denis.tail07d7b1.ts.net 'wsl tmux capture-pane -t train -p' | tail -20
 
-# Check log file
-ssh ooousay@denis.tail07d7b1.ts.net "wsl tail -20 /tmp/training.log"
-
-# Check if still running
+# Process running?
 ssh ooousay@denis.tail07d7b1.ts.net "wsl ps aux" | grep python
 
-# Check GPU utilization
+# GPU usage
 ssh ooousay@denis.tail07d7b1.ts.net "wsl nvidia-smi"
 ```
 
 ---
 
-## Model Management
+## Common Mistakes (DON'T DO THESE)
 
-### ALWAYS backup before retraining
+❌ `ssh ... "wsl tmux new-session -d -s train 'cd ... && python ...'"`
+→ Quoting breaks. Use a script instead.
+
+❌ `ssh ... "wsl ps aux | grep python"`
+→ Pipe runs on Windows. Do: `ssh ... "wsl ps aux" | grep python`
+
+❌ Starting training without backing up model
+→ The script `run_training.sh` does this automatically.
+
+❌ Not monitoring
+→ Training can crash silently. Always launch a monitor subagent.
+
+---
+
+## Key Paths
+
+| What | Path |
+|------|------|
+| Repo | `/home/ooousay/repos/autonomous-drone-racing/` |
+| Venv | `/home/ooousay/repos/pybullet-venv/` |
+| Models | `models/vision_student/` |
+| Training log | `/tmp/training.log` |
+
+---
+
+## Quick Commands
 
 ```bash
-# Before starting new training
-ssh ooousay@denis.tail07d7b1.ts.net "wsl cp /home/ooousay/repos/autonomous-drone-racing/models/vision_student/best_model.pt /home/ooousay/repos/autonomous-drone-racing/models/vision_student/best_model.$(date +%Y%m%d_%H%M%S).pt"
-```
+# SSH
+ssh ooousay@denis.tail07d7b1.ts.net
 
-### Copy model to local
+# Check GPU
+ssh ooousay@denis.tail07d7b1.ts.net "wsl nvidia-smi"
 
-```bash
+# Check processes
+ssh ooousay@denis.tail07d7b1.ts.net "wsl ps aux" | grep python
+
+# List tmux sessions
+ssh ooousay@denis.tail07d7b1.ts.net 'wsl tmux list-sessions'
+
+# Kill tmux session
+ssh ooousay@denis.tail07d7b1.ts.net 'wsl tmux kill-session -t train'
+
+# Copy model to local
 scp ooousay@denis.tail07d7b1.ts.net:/home/ooousay/repos/autonomous-drone-racing/models/vision_student/best_model.pt ./models/vision_student/
 ```
 
-### List saved models
-
-```bash
-ssh ooousay@denis.tail07d7b1.ts.net "wsl ls -la /home/ooousay/repos/autonomous-drone-racing/models/vision_student/"
-```
-
 ---
 
-## Troubleshooting
+## Hardware
 
-### No output showing
-- Use `python -u` or `export PYTHONUNBUFFERED=1`
-- Use `| tee /tmp/training.log` to capture output
+- **GPU:** RTX 5080 (16GB VRAM)
+- **RAM:** 64GB
+- **CPU:** 24 cores
+- **OS:** Windows 11 + WSL2 Ubuntu
 
-### tmux command fails
-- **Never use inline commands with quotes**
-- Always put commands in a .sh script and run the script
-
-### Training crashed silently
-- Check `/tmp/training.log` for errors
-- Check `wsl dmesg | tail` for OOM kills
-
-### Model got overwritten
-- Should have backed up first (see above)
-- Check for `.backup.pt` files
-
-### SSH times out
-1. Check Tailscale: `tailscale status`
-2. Ping: `ping denis.tail07d7b1.ts.net`
-3. PC might be asleep - wake it up
-
-### Pipe commands fail ("grep not recognized")
-Pipes run on Windows, not WSL. Do this:
-```bash
-# Wrong
-ssh ... "wsl ps aux | grep python"
-
-# Correct
-ssh ... "wsl ps aux" | grep python
-```
-
----
-
-## Architecture
-
-```
-Local Mac ──SSH──> Windows (training-pc) ──WSL──> Ubuntu
-```
-
-**Key paths on training PC (WSL):**
-| What | Path |
-|------|------|
-| Project repo | `/home/ooousay/repos/autonomous-drone-racing/` |
-| Python venv | `/home/ooousay/repos/pybullet-venv/` |
-| Models | `models/` |
-| Data | `data/` |
-| Training logs | `/tmp/training.log` |
-
----
-
-## Hardware Specs
-
-| Component | Spec |
-|-----------|------|
-| GPU | RTX 5080 (16GB VRAM) |
-| RAM | 64GB |
-| CPU | 24 cores |
-| OS | Windows 11 + WSL2 (Ubuntu) |
-
-### Known Limitations
-
-- **No Vulkan** - WSL2 only supports CUDA, not Vulkan
-- **Camera rendering works** - gym-pybullet-drones uses OpenGL (CPU)
-- **Isaac Sim abandoned** - Don't use, Vulkan required for cameras
+**Limitations:**
+- No Vulkan (CUDA only)
+- Isaac Sim doesn't work here
