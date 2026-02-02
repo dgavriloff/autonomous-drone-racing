@@ -224,33 +224,69 @@ def evaluate_gates(model, n_episodes=10):
 
 
 def load_bc_weights_into_ppo(model, bc_checkpoint_path):
-    """Load BC weights into PPO's feature extractor."""
+    """Load BC weights into PPO's feature extractor and policy network."""
     print(f"\nLoading BC weights from: {bc_checkpoint_path}")
 
     checkpoint = torch.load(bc_checkpoint_path, map_location=model.device, weights_only=False)
     bc_state = checkpoint["model_state_dict"]
 
-    # Map BC encoder weights to PPO feature extractor
-    # BC: encoder.0, encoder.2, encoder.4, encoder.6 (Conv2d layers)
-    # PPO: policy.features_extractor.cnn.0, .2, .4, .6
+    # Print BC model structure for debugging
+    print("BC model keys:")
+    for k in bc_state.keys():
+        print(f"  {k}: {bc_state[k].shape}")
+
     ppo_state = model.policy.state_dict()
+    print("\nPPO policy keys:")
+    for k in ppo_state.keys():
+        print(f"  {k}: {ppo_state[k].shape}")
 
     weights_loaded = 0
+
+    # Map BC encoder weights to PPO feature extractor CNN
+    # BC: encoder.0, encoder.2, encoder.4, encoder.6 (Conv2d layers)
+    # PPO: features_extractor.cnn.0, .2, .4, .6
     for bc_key, bc_tensor in bc_state.items():
         if bc_key.startswith("encoder."):
-            # Map encoder.X -> features_extractor.cnn.X
             ppo_key = bc_key.replace("encoder.", "features_extractor.cnn.")
             if ppo_key in ppo_state:
                 if ppo_state[ppo_key].shape == bc_tensor.shape:
                     ppo_state[ppo_key] = bc_tensor
                     weights_loaded += 1
                     print(f"  ✓ {bc_key} -> {ppo_key}")
-                else:
-                    print(f"  ✗ {bc_key}: shape mismatch {bc_tensor.shape} vs {ppo_state[ppo_key].shape}")
+
+    # Map BC policy_head.0 (Linear 3072->256) to PPO features_extractor.linear.0
+    # BC: policy_head.0.weight, policy_head.0.bias
+    # PPO: features_extractor.linear.0.weight, features_extractor.linear.0.bias
+    bc_to_ppo_policy = {
+        "policy_head.0.weight": "features_extractor.linear.0.weight",
+        "policy_head.0.bias": "features_extractor.linear.0.bias",
+    }
+    for bc_key, ppo_key in bc_to_ppo_policy.items():
+        if bc_key in bc_state and ppo_key in ppo_state:
+            if bc_state[bc_key].shape == ppo_state[ppo_key].shape:
+                ppo_state[ppo_key] = bc_state[bc_key]
+                weights_loaded += 1
+                print(f"  ✓ {bc_key} -> {ppo_key}")
+            else:
+                print(f"  ✗ {bc_key}: shape mismatch {bc_state[bc_key].shape} vs {ppo_state[ppo_key].shape}")
+
+    # Map BC policy_head.3 (Linear 256->256) to PPO mlp_extractor.policy_net.0
+    bc_to_ppo_mlp = {
+        "policy_head.3.weight": "mlp_extractor.policy_net.0.weight",
+        "policy_head.3.bias": "mlp_extractor.policy_net.0.bias",
+    }
+    for bc_key, ppo_key in bc_to_ppo_mlp.items():
+        if bc_key in bc_state and ppo_key in ppo_state:
+            if bc_state[bc_key].shape == ppo_state[ppo_key].shape:
+                ppo_state[ppo_key] = bc_state[bc_key]
+                weights_loaded += 1
+                print(f"  ✓ {bc_key} -> {ppo_key}")
+            else:
+                print(f"  ✗ {bc_key}: shape mismatch {bc_state[bc_key].shape} vs {ppo_state[ppo_key].shape}")
 
     # Load the updated state dict
     model.policy.load_state_dict(ppo_state)
-    print(f"Loaded {weights_loaded} weight tensors from BC checkpoint")
+    print(f"\nLoaded {weights_loaded} weight tensors from BC checkpoint")
 
     return model
 
