@@ -14,6 +14,7 @@ python -u scripts/rl_finetune_vision.py \
     --timesteps 500000 \
     --envs 16 \
     --eval-freq 50000 \
+    --bc-checkpoint data/dagger/iter_02/model/best_model.pt \
     2>&1 | tee /tmp/rl_finetune.log
 
 echo ""

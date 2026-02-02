@@ -223,12 +223,46 @@ def evaluate_gates(model, n_episodes=10):
     return gates_list
 
 
+def load_bc_weights_into_ppo(model, bc_checkpoint_path):
+    """Load BC weights into PPO's feature extractor."""
+    print(f"\nLoading BC weights from: {bc_checkpoint_path}")
+
+    checkpoint = torch.load(bc_checkpoint_path, map_location=model.device)
+    bc_state = checkpoint["model_state_dict"]
+
+    # Map BC encoder weights to PPO feature extractor
+    # BC: encoder.0, encoder.2, encoder.4, encoder.6 (Conv2d layers)
+    # PPO: policy.features_extractor.cnn.0, .2, .4, .6
+    ppo_state = model.policy.state_dict()
+
+    weights_loaded = 0
+    for bc_key, bc_tensor in bc_state.items():
+        if bc_key.startswith("encoder."):
+            # Map encoder.X -> features_extractor.cnn.X
+            ppo_key = bc_key.replace("encoder.", "features_extractor.cnn.")
+            if ppo_key in ppo_state:
+                if ppo_state[ppo_key].shape == bc_tensor.shape:
+                    ppo_state[ppo_key] = bc_tensor
+                    weights_loaded += 1
+                    print(f"  ✓ {bc_key} -> {ppo_key}")
+                else:
+                    print(f"  ✗ {bc_key}: shape mismatch {bc_tensor.shape} vs {ppo_state[ppo_key].shape}")
+
+    # Load the updated state dict
+    model.policy.load_state_dict(ppo_state)
+    print(f"Loaded {weights_loaded} weight tensors from BC checkpoint")
+
+    return model
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--timesteps", type=int, default=500000)
     parser.add_argument("--envs", type=int, default=16)
     parser.add_argument("--eval-freq", type=int, default=50000)
     parser.add_argument("--output", default="models/vision_rl/best_model.zip")
+    parser.add_argument("--bc-checkpoint", default="data/dagger/iter_02/model/best_model.pt",
+                        help="BC checkpoint to initialize from")
     args = parser.parse_args()
 
     print("=" * 60)
@@ -270,6 +304,13 @@ def main():
 
     print(f"\nModel created on device: {model.device}")
     print(f"Policy: {model.policy.__class__.__name__}")
+
+    # Load BC weights if checkpoint exists
+    if args.bc_checkpoint and Path(args.bc_checkpoint).exists():
+        model = load_bc_weights_into_ppo(model, args.bc_checkpoint)
+    else:
+        print(f"\nWARNING: BC checkpoint not found at {args.bc_checkpoint}")
+        print("Training from scratch (this is much slower!)")
 
     # Create output directory
     Path(args.output).parent.mkdir(parents=True, exist_ok=True)
