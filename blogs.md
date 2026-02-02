@@ -3217,3 +3217,65 @@ python scripts/run_dagger.py \
 Key improvement: training on states the student actually visits.
 
 ---
+
+## Entry 46: DAgger Results - Modest Improvement
+**Date: 2026-02-02**
+
+### Results
+
+| Stage | Data | Gates | Notes |
+|-------|------|-------|-------|
+| BC Baseline | 94K | 2.9/5 | Epoch 3 checkpoint |
+| DAgger Iter 1 | 194K | 1.9/5 | ⚠️ Got worse |
+| DAgger Iter 2 | 294K | 2.9/5 | Recovered |
+| DAgger Iter 3 | 394K | **3.2/5** | +10% improvement |
+
+**Prediction was 4.5-5/5. Actual result: 3.2/5.**
+
+### Why DAgger Underperformed
+
+1. **Resource utilization was poor:**
+   - RTX 5080: ~20% used (idle during data collection)
+   - 24 CPU cores: Only 1-2 used (single-threaded simulation)
+   - Data collection was the bottleneck, not training
+   - Should have parallelized with SubprocVecEnv (16 envs)
+
+2. **Training was too short:**
+   - Only 5 epochs per iteration on 4x more data
+   - Likely underfitting - not enough time to learn from new data
+   - Should have used 10-20 epochs
+
+3. **Beta schedule might be wrong:**
+   - Started at 0.5 (too much teacher intervention?)
+   - Research suggests starting higher (0.9) then decaying
+
+4. **No curriculum over iterations:**
+   - Each iteration trained from scratch on merged data
+   - Could have warm-started from previous iteration's best checkpoint
+
+### What DAgger DID Help With
+
+- Iter 1→2 recovery shows it's learning something
+- Final model slightly more consistent (fewer 1/5 runs)
+- 4x more training data collected
+
+### Lessons Learned
+
+1. **Parallelize data collection** - Single-threaded simulation wastes GPU
+2. **More epochs for more data** - 5 epochs on 400K frames is underfitting
+3. **DAgger alone isn't magic** - UZH uses DAgger + RL fine-tuning for a reason
+4. **Predictions were optimistic** - Research numbers don't always transfer
+
+### Hardware Utilization (What Should Have Been Done)
+
+```python
+# Bad (what we did):
+for ep in range(100):
+    single_env.step()  # 1 core, GPU idle
+
+# Good (what we should do):
+envs = SubprocVecEnv([make_env] * 16)  # 16 parallel envs
+envs.step(actions)  # 16x throughput
+```
+
+---
