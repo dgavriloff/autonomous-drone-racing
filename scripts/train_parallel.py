@@ -506,9 +506,9 @@ def train(
         # Transfer learning: load pretrained model
         print(f"Loading pretrained model from {resume_from}...")
         if algorithm.upper() == "SAC":
-            model = SAC.load(resume_from, env=env, verbose=1, tensorboard_log="./logs/parallel_vel")
+            model = SAC.load(resume_from, env=env, verbose=1, tensorboard_log=None)
         else:
-            model = PPO.load(resume_from, env=env, verbose=1, tensorboard_log="./logs/parallel_vel")
+            model = PPO.load(resume_from, env=env, verbose=1, tensorboard_log=None)
     elif algorithm.upper() == "SAC":
         model = SAC(
             "MlpPolicy",
@@ -521,7 +521,7 @@ def train(
             gamma=0.99,
             ent_coef="auto",  # Auto-tuning works better for this task
             verbose=1,
-            tensorboard_log="./logs/parallel_vel",
+            tensorboard_log=None,
         )
     else:
         # PPO benefits more from parallel envs and has stable exploration
@@ -537,7 +537,7 @@ def train(
             clip_range=0.2,
             ent_coef=0.01,  # Encourage exploration
             verbose=1,
-            tensorboard_log="./logs/parallel_vel",
+            tensorboard_log=None,
         )
 
     # Callbacks
