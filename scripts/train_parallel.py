@@ -285,13 +285,14 @@ class VelocityRacingEnv(BaseRLAviary):
         ctrl_freq: int = 48,
         pyb_freq: int = 240,
         gui: bool = False,
-        gate_tolerance: float = 0.8,  # Larger tolerance so agent can pass more gates and learn
+        gate_tolerance: float = 0.8,
         max_steps: int = 500,
-        reward_gate: float = 50.0,
-        reward_progress: float = 2.0,
-        reward_velocity: float = 0.2,
-        reward_smoothness: float = -0.01,
-        reward_crash: float = -50.0,
+        # FIXED dense reward - prioritize progress toward gate
+        reward_gate: float = 100.0,       # Was 50 - big bonus for gate
+        reward_progress: float = 50.0,    # Was 2 - 50x per meter toward gate
+        reward_velocity: float = 2.0,     # Was 0.2 - reward speed toward gate
+        reward_smoothness: float = -0.005, # Was -0.01 - reduced penalty
+        reward_crash: float = -20.0,      # Was -50 - reduced penalty
         speed_factor: float = 0.03,  # Fraction of MAX_SPEED_KMH for SPEED_LIMIT
     ):
         self.track = track

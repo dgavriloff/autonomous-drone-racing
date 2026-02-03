@@ -58,13 +58,14 @@ class SwiftRacingEnv(BaseAviary):
         gui: bool = False,
         gate_tolerance: float = 0.8,
         max_steps: int = 1000,
-        # Reward coefficients (Swift-inspired)
-        lambda_progress: float = 2.0,
+        # Reward coefficients (FIXED - dense progress reward)
+        lambda_progress: float = 50.0,  # Was 2.0 - NOW 50x per meter toward gate
+        lambda_velocity: float = 2.0,   # NEW: reward velocity toward gate
         lambda_perception: float = 0.1,
-        lambda_cmd_rate: float = -0.01,
-        lambda_cmd_smooth: float = -0.005,
-        crash_penalty: float = 5.0,
-        gate_bonus: float = 10.0,
+        lambda_cmd_rate: float = -0.005,  # Reduced from -0.01
+        lambda_cmd_smooth: float = -0.002,  # Reduced from -0.005
+        crash_penalty: float = 20.0,  # Was 5.0 - moderate penalty
+        gate_bonus: float = 100.0,  # Was 10.0 - big bonus for gate
         # Thrust scaling
         max_thrust_accel: float = 20.0,  # m/s², ~2g
         max_body_rate: float = 10.0,  # rad/s
@@ -75,6 +76,7 @@ class SwiftRacingEnv(BaseAviary):
 
         # Reward coefficients
         self.lambda_progress = lambda_progress
+        self.lambda_velocity = lambda_velocity
         self.lambda_perception = lambda_perception
         self.lambda_cmd_rate = lambda_cmd_rate
         self.lambda_cmd_smooth = lambda_cmd_smooth
@@ -217,18 +219,27 @@ class SwiftRacingEnv(BaseAviary):
 
         # Torque needed for angular acceleration
         # τ = I * α, but for rate control we use proportional gain
-        k_rate = 0.1 * self.HOVER_RPM  # Tuning parameter
+        k_rate = 0.02 * self.HOVER_RPM  # Reduced for stability
 
         roll_diff = k_rate * roll_rate
         pitch_diff = k_rate * pitch_rate
-        yaw_diff = k_rate * yaw_rate * 0.1  # Yaw is weaker
+        yaw_diff = k_rate * yaw_rate * 0.5  # Yaw
 
-        # Motor mixing (X config)
+        # Motor mixing (CF2X X-config)
+        # Motor positions (from URDF inspection):
+        #   3(FL)   0(FR)     +X forward
+        #      \ /
+        #       X
+        #      / \
+        #   2(RL)   1(RR)
+        #
+        # Negative pitch command = pitch forward (nose down) = front faster
+        # Positive roll command = roll right = right faster
         rpm = np.array([
-            base_rpm - roll_diff - pitch_diff - yaw_diff,  # Motor 0 (front-left, CW)
-            base_rpm + roll_diff - pitch_diff + yaw_diff,  # Motor 1 (front-right, CCW)
-            base_rpm + roll_diff + pitch_diff - yaw_diff,  # Motor 2 (rear-right, CW)
-            base_rpm - roll_diff + pitch_diff + yaw_diff,  # Motor 3 (rear-left, CCW)
+            base_rpm - roll_diff + pitch_diff + yaw_diff,  # Motor 0: Front-Right, CW
+            base_rpm - roll_diff - pitch_diff - yaw_diff,  # Motor 1: Rear-Right, CCW
+            base_rpm + roll_diff - pitch_diff + yaw_diff,  # Motor 2: Rear-Left, CW
+            base_rpm + roll_diff + pitch_diff - yaw_diff,  # Motor 3: Front-Left, CCW
         ])
 
         # Clip to valid RPM range
@@ -237,7 +248,7 @@ class SwiftRacingEnv(BaseAviary):
         return rpm.reshape(1, 4)
 
     def _computeReward(self):
-        """Swift-inspired reward function."""
+        """Dense reward function - prioritizes progress toward gate."""
         reward = 0.0
 
         state = self._getDroneStateVector(0)
@@ -246,29 +257,29 @@ class SwiftRacingEnv(BaseAviary):
         quat = state[3:7]
 
         gate = self.track.gates[self.current_gate]
-        dist = np.linalg.norm(pos - gate.position)
+        to_gate = gate.position - pos
+        dist = np.linalg.norm(to_gate)
+        to_gate_dir = to_gate / (dist + 1e-6)
 
-        # 1. Progress reward (PBRS-like)
+        # 1. DENSE PROGRESS REWARD (most important!)
+        # Reward getting closer to gate, penalize getting farther
         if self.prev_dist is not None:
-            progress = self.prev_dist - dist
-            reward += self.lambda_progress * progress
+            progress = self.prev_dist - dist  # Positive when approaching
+            reward += self.lambda_progress * progress  # 50x per meter
 
-        # 2. Perception reward: keep gate in camera FOV
-        # Camera points along body x-axis
+        # 2. VELOCITY TOWARD GATE (reward speed in right direction)
+        velocity_toward_gate = np.dot(vel, to_gate_dir)
+        reward += self.lambda_velocity * max(0, velocity_toward_gate)  # Only reward positive velocity
+
+        # 3. Perception reward: keep gate in camera FOV (minor)
         rot_matrix = np.array(p.getMatrixFromQuaternion(quat)).reshape(3, 3)
         camera_axis = rot_matrix[:, 0]  # Body x-axis in world frame
-        to_gate = (gate.position - pos)
-        to_gate_norm = to_gate / (np.linalg.norm(to_gate) + 1e-6)
-
-        # Angle between camera axis and gate direction
-        cos_angle = np.dot(camera_axis, to_gate_norm)
+        cos_angle = np.dot(camera_axis, to_gate_dir)
         angle = np.arccos(np.clip(cos_angle, -1, 1))
-
-        # Swift uses exp(λ₃ * δ⁴), we simplify
-        perception_reward = np.exp(-2.0 * angle**2)  # Gaussian-like
+        perception_reward = np.exp(-2.0 * angle**2)
         reward += self.lambda_perception * perception_reward
 
-        # 3. Command smoothness
+        # 4. Command smoothness (minor penalties)
         body_rates = state[13:16]
         reward += self.lambda_cmd_rate * np.linalg.norm(body_rates)
 
@@ -278,9 +289,9 @@ class SwiftRacingEnv(BaseAviary):
 
         self.prev_dist = dist
 
-        # 4. Gate passing bonus
+        # 5. GATE PASSING BONUS (big reward!)
         if dist < self.gate_tolerance and not gate.passed:
-            reward += self.gate_bonus
+            reward += self.gate_bonus  # +100
             gate.passed = True
             self.gates_passed += 1
             self.current_gate = min(self.current_gate + 1, len(self.track.gates) - 1)
@@ -392,10 +403,10 @@ def create_simple_track(num_gates=5, radius=1.5, height=0.5):
             orientation=np.array(quat),
         ))
 
-    # Start position: inside circle, facing first gate
-    start_x = radius * 0.5
+    # Start position: center of circle, must fly to first gate
+    # This ensures drone starts ~radius meters from first gate
     return TrackConfig(
         name=f"circle_{num_gates}g",
         gates=gates,
-        start_position=np.array([start_x, 0.0, height]),
+        start_position=np.array([0.0, 0.0, height]),
     )
