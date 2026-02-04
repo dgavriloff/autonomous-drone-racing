@@ -412,7 +412,56 @@ class VelocityRacingEnv(BaseRLAviary):
         self.prev_action = None
         for gate in self.track.gates:
             gate.passed = False
-        return super().reset(seed=seed, options=options)
+        obs, info = super().reset(seed=seed, options=options)
+
+        # Draw gates in GUI mode
+        if self.GUI:
+            self._draw_gates()
+
+        return obs, info
+
+    def _draw_gates(self):
+        """Draw gate markers in PyBullet GUI."""
+        gate_size = 0.3  # Half-width of gate in meters (0.6m total)
+
+        for i, gate in enumerate(self.track.gates):
+            pos = gate.position
+            quat = gate.orientation
+            rot = np.array(p.getMatrixFromQuaternion(quat)).reshape(3, 3)
+
+            # Gate corners in local frame - vertical gate (Y-Z plane)
+            # Gate faces along X axis, spans Y (width) and Z (height)
+            corners = np.array([
+                [0, -gate_size, -gate_size],  # bottom-left
+                [0, gate_size, -gate_size],   # bottom-right
+                [0, gate_size, gate_size],    # top-right
+                [0, -gate_size, gate_size],   # top-left
+            ])
+
+            # Transform to world frame
+            world_corners = [pos + rot @ c for c in corners]
+
+            # Draw gate frame (square)
+            color = [0, 1, 0] if i == 0 else [1, 0.5, 0]  # Green for first, orange for rest
+            line_width = 3
+
+            for j in range(4):
+                p.addUserDebugLine(
+                    world_corners[j],
+                    world_corners[(j + 1) % 4],
+                    lineColorRGB=color,
+                    lineWidth=line_width,
+                    physicsClientId=self.CLIENT
+                )
+
+            # Draw gate number above
+            p.addUserDebugText(
+                str(i + 1),
+                pos + np.array([0, 0, gate_size + 0.15]),
+                textColorRGB=[1, 1, 1],
+                textSize=1.2,
+                physicsClientId=self.CLIENT
+            )
 
     def step(self, action):
         self.step_count += 1
